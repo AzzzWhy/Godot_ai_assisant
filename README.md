@@ -5,7 +5,7 @@
 ## 已实现功能：
 
 - 编辑器内聊天面板：右侧Dock直接对话、流式输出、让AI分析脚本、一键把生成的GDScript插入当前脚本。
-- 任何 OpenAI 兼容后端：DeepSeek、OpenAI、Kimi(Moonshot)、通义千问、智谱 GLM、本地 Ollama、vLLM 等，仅需修改base_url。
+- 任何 OpenAI 兼容桌面：DeepSeek、OpenAI、Kimi(Moonshot)、通义千问、智谱 GLM、本地 Ollama、vLLM 等，仅需修改base_url。
 - 模型自动识别：填入Key + 地址后自动拉取该账号真实可用的模型列表。
 
 ---
@@ -40,7 +40,7 @@
 | `/help` / `/clear` / `/script`                   | 快捷命令                           |
 | 自动识别本Key可用模型（保存设置后自动拉取）      | 设置→保存 / 点「刷新」             |
 | 「我的模型」收藏（不把API全部模型堆进下拉框）    | 设置→服务器模型「+加入」/「—移除」 |
-| 设置 Base URL / Key / 模型 / 温度 / max_tokens    | ⚙ 设置                            |
+| 词                                               | 设置                               |
 | 快速切换模型                                     | 面板顶部下拉                       |
 | 发送当前脚本给AI分析                             | 面板按钮                           |
 | 把回复中的代码块插入当前脚本 / 另存为脚本 / 复制 | 面板底部                           |
@@ -85,7 +85,7 @@
 
 ---
 
-### 六，licence
+### 七，licence
 
 ---
 
