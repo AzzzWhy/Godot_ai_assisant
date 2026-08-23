@@ -50,16 +50,17 @@
 
 ### 四，目录结构
 
-| 路径                                           | 说明                                       |
-| ---------------------------------------------- | ------------------------------------------ |
-| `project.godot`                                | Godot 项目配置文件                         |
-| `examples/npc_demo.gd/.tscn`                   | 游戏内 NPC 对话示例场景（可直接运行）      |
-| `addons/ai_assistant/plugin.cfg`               | 插件基本信息（名称、版本、作者等）         |
-| `addons/ai_assistant/plugin.gd`                | 编辑器插件入口，负责注册 AI 聊天面板和单例 |
-| `addons/ai_assistant/icon.svg`                 | 插件图标（在插件管理器中显示）             |
-| `addons/ai_assistant/autoload/ai_assistant.gd` | 全局单例，提供运行时 AI 调用接口           |
-| `addons/ai_assistant/client/llm_client.gd`     | OpenAI 兼容大模型客户端（支持流式 SSE）    |
-| `addons/ai_assistant/editor/ai_chat_dock.gd`   | 编辑器底部/侧边栏的 AI 对话面板            |
+| 路径                                              | 它是干嘛用的                                                 |
+| :------------------------------------------------ | :----------------------------------------------------------- |
+| `project.godot`                                   | Godot 的项目"户口本"——没有它，Godot 不认这个文件夹是一个项目 |
+| `examples/npc_demo.gd / .tscn`                    | 游戏里 NPC 跟玩家聊天的示例，运行主场景就能看到效果          |
+| `addons/ai_assistant/`                            | **插件的本体**——想装进别的项目，复制这一个文件夹就行         |
+| `addons/ai_assistant/plugin.cfg`                  | 插件的身份证：名字、版本、作者                               |
+| `addons/ai_assistant/plugin.gd`                   | 插件的"总开关"，Godot 靠它知道这里有个插件并把它加载出来     |
+| `addons/ai_assistant/icon.svg`                    | 插件图标，显示在 Godot 的插件管理列表里                      |
+| `addons/ai_assistant/autoload/ai_assistant.gd`    | 游戏运行时全局那个 `AI` 对象——代码里写 `AI.chat()` 就是它    |
+| `addons/ai_assistant/client/llm_client.gd`        | 真正跟大模型"打电话"的部分：发请求、收流式回复、拉模型列表   |
+| `addons/ai_assistant/editor/ai_chat_dock.gd`      | 编辑器右侧那个聊天窗口本身                                   |
 
 ---
 
