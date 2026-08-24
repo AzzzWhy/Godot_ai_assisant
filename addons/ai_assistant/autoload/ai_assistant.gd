@@ -18,9 +18,9 @@ func _ready() -> void:
 
 ## 从 ProjectSettings / 环境变量刷新配置（可在运行时再次调用以热更新）
 func sync_settings() -> void:
-	base_url = _env_or("AI_BASE_URL", ProjectSettings.get_setting("ai_assistant/base_url", base_url))
-	api_key = _env_or("AI_API_KEY", ProjectSettings.get_setting("ai_assistant/api_key", ""))
-	model = _env_or("AI_MODEL", ProjectSettings.get_setting("ai_assistant/model", model))
+	base_url = _env_or("AI_BASE_URL", ProjectSettings.get_setting("ai_assistant/base_url", base_url)).strip_edges()
+	api_key = _env_or("AI_API_KEY", ProjectSettings.get_setting("ai_assistant/api_key", "")).strip_edges()
+	model = _env_or("AI_MODEL", ProjectSettings.get_setting("ai_assistant/model", model)).strip_edges()
 	temperature = float(ProjectSettings.get_setting("ai_assistant/temperature", temperature))
 	max_tokens = int(ProjectSettings.get_setting("ai_assistant/max_tokens", max_tokens))
 	timeout_seconds = float(ProjectSettings.get_setting("ai_assistant/timeout", timeout_seconds))

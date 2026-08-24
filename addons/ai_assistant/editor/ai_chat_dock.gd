@@ -76,7 +76,7 @@ func _ready() -> void:
 	_build_ui()
 	_apply_config_to_ui()
 	_restore_cached_models()
-	_set_busy(false)  # 确保「发送」按钮默认可用（之前首次使用时是禁用的）
+	_set_busy(false)  # 初始为就绪状态：发送按钮应保持可用
 	_log.append_text("\n[color=%s]🤖 你好！我是接入 Godot 的 AI 助手。\n支持 DeepSeek / OpenAI / Ollama 等任意 OpenAI 兼容接口。\n输入消息即可开始；点击「设置」配置 API Key 与模型。\n[color=%s]小提示：[/color] /help 查看命令 · 「发送当前脚本」可让 AI 分析你正在编辑的代码。[/color]\n" % [_color_str(COLOR_SYSTEM), _color_str(COLOR_SYSTEM)])
 	_set_status("就绪 · " + _client.model, COLOR_STATUS)
 	# 已填 Key 且无缓存模型时，自动从服务器拉取可用模型
@@ -803,13 +803,11 @@ func _on_finished(success: bool, error_message: String) -> void:
 	if not _last_code_blocks.is_empty():
 		tail = "完成 · %d 个代码块" % _last_code_blocks.size()
 	_set_status(tail + " · " + _client.model, COLOR_OK)
-	_send_btn.disabled = false
 
 
 func _set_busy(b: bool) -> void:
 	_busy = b
-	_send_btn.disabled = not b
-	# 请求进行中仍允许输入下一句（回车会提示"上一请求进行中"）
+	_send_btn.disabled = b  # 忙时禁用发送按钮；输入框仍可继续输入（回车会提示"上一请求进行中"）
 
 
 func _set_status(text: String, color: Color) -> void:

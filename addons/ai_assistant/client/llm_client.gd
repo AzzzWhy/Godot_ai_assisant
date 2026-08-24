@@ -47,6 +47,7 @@ var last_reasoning_text := ""
 var _client: HTTPClient = null
 var _endpoint_path := CHAT_PATH
 var _buffer := ""
+var _utf8_carry := PackedByteArray()  # 跨包截断的 UTF-8 残留字节，避免多字节字符被拆坏
 var _stream_mode := false
 var _request_sent := false
 var _status_code := 0
@@ -162,6 +163,9 @@ func _on_models_completed(result: int, response_code: int, _headers: PackedStrin
 	if json.parse(body.get_string_from_utf8()) != OK:
 		models_loaded.emit([], "模型列表响应解析失败")
 		return
+	if not (json.data is Dictionary):
+		models_loaded.emit([], "模型列表响应结构异常")
+		return
 	var obj: Dictionary = json.data
 	var data: Array = obj.get("data", [])
 	var ids: Array = []
@@ -183,6 +187,7 @@ func _pump() -> void:
 	_busy = true
 	_stream_mode = stream
 	_buffer = ""
+	_utf8_carry = PackedByteArray()
 	_request_sent = false
 	_status_code = 0
 	_finalized = false
@@ -232,7 +237,7 @@ func _process(_delta: float) -> void:
 				_status_code = _client.get_response_code()
 			var chunk: PackedByteArray = _client.read_response_body_chunk()
 			if chunk.size() > 0:
-				_buffer += chunk.get_string_from_utf8()
+				_buffer += _decode_chunk(chunk)
 				if _stream_mode:
 					_consume_stream_events()
 		HTTPClient.STATUS_DISCONNECTED:
@@ -344,13 +349,57 @@ func _build_payload() -> Dictionary:
 
 ## ---------- 流式（SSE）解析 ----------
 
+## 把新到达的字节块解码为文本；若网络包边界把一个 UTF-8 多字节字符切成两半，
+## 则把残缺字节暂存到 _utf8_carry，等下一块补齐后再解码，避免中文乱码。
+func _decode_chunk(chunk: PackedByteArray) -> String:
+	var bytes := _utf8_carry
+	_utf8_carry = PackedByteArray()
+	bytes.append_array(chunk)
+	var incomplete := _trailing_utf8_len(bytes)
+	if incomplete > 0:
+		var split := bytes.size() - incomplete
+		_utf8_carry = bytes.slice(split)
+		bytes = bytes.slice(0, split)
+	return bytes.get_string_from_utf8()
+
+
+## 返回末尾不完整 UTF-8 序列占用的字节数（0 表示可安全整体解码）。
+func _trailing_utf8_len(b: PackedByteArray) -> int:
+	var n := b.size()
+	if n == 0:
+		return 0
+	var s := n - 1
+	# 从末尾向前收集连续的后缀字节（0b10xxxxxx）
+	while s > 0 and (b[s] & 0xC0) == 0x80:
+		s -= 1
+	var lead := b[s]
+	var seq := 0
+	if lead < 0x80:
+		return 0
+	elif (lead & 0xE0) == 0xC0:
+		seq = 2
+	elif (lead & 0xF0) == 0xE0:
+		seq = 3
+	elif (lead & 0xF8) == 0xF0:
+		seq = 4
+	else:
+		return 0  # 非法字节，交给解码器按替换符处理
+	var got := n - s
+	return got if got < seq else 0
+
+
 func _consume_stream_events() -> void:
 	while true:
 		var idx := _buffer.find("\n\n")
+		var sep_len := 2
+		var idx_crlf := _buffer.find("\r\n\r\n")
+		if idx_crlf != -1 and (idx == -1 or idx_crlf < idx):
+			idx = idx_crlf
+			sep_len = 4
 		if idx == -1:
 			break
 		var event := _buffer.substr(0, idx)
-		_buffer = _buffer.substr(idx + 2)
+		_buffer = _buffer.substr(idx + sep_len)
 		_handle_stream_event(event)
 
 
@@ -370,6 +419,9 @@ func _handle_stream_event(event: String) -> void:
 	var json := JSON.new()
 	if json.parse(data) != OK:
 		push_warning("AI 流式数据解析失败: %s" % data)
+		return
+	if not (json.data is Dictionary):
+		push_warning("AI 流式数据不是 JSON 对象: %s" % data)
 		return
 	var obj: Dictionary = json.data
 	var choices: Array = obj.get("choices", [])
@@ -403,6 +455,14 @@ func _handle_body_end() -> void:
 		_fail_with_server_error()
 		return
 	if _stream_mode:
+		# 连接已结束：先 flush 掉可能残留的「缺少结尾空行」的最后一段
+		_consume_stream_events()
+		var rest := _buffer.strip_edges()
+		if not rest.is_empty():
+			_handle_stream_event(rest)
+			_buffer = ""
+		if _finalized:
+			return
 		# 个别服务端即使请求了 stream 也会整体返回 JSON，兜底解析
 		if last_response_text.is_empty() and not _buffer.is_empty():
 			_extract_from_json(_buffer)
@@ -416,6 +476,9 @@ func _extract_from_json(raw: String) -> void:
 	var json := JSON.new()
 	if json.parse(raw) != OK:
 		push_warning("无法解析响应 JSON")
+		return
+	if not (json.data is Dictionary):
+		push_warning("AI 响应不是预期的 JSON 对象结构")
 		return
 	var obj: Dictionary = json.data
 	var choices: Array = obj.get("choices", [])
