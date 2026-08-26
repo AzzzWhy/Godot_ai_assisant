@@ -10,6 +10,8 @@ extends SceneTree
 ## 这类引用类型来累加/记录信号结果。
 
 var _fails := 0
+const PROPOSAL_PARSER := preload("res://addons/ai_assistant/agent/proposal_parser.gd")
+const PROPOSAL_STORE := preload("res://addons/ai_assistant/agent/proposal_store.gd")
 
 
 func _initialize() -> void:
@@ -17,6 +19,7 @@ func _initialize() -> void:
 	_test_sse_streaming()
 	_test_nonstream_json()
 	_test_queue_and_cleanup()
+	_test_proposal_contract()
 	if _fails == 0:
 		print("SMOKE_TEST_OK: 全部通过")
 		quit(0)
@@ -111,6 +114,23 @@ func _test_queue_and_cleanup() -> void:
 	_check(client.get_history().is_empty(), "两条失败后历史应为空，实际 %d 条" % client.get_history().size())
 	_check(not client.is_busy(), "队列清空后不应 busy")
 	client.free()
+
+
+# ---------- 场景 5：提案 JSON 与路径沙箱 ----------
+
+func _test_proposal_contract() -> void:
+	var response := "```json\n" + JSON.stringify({
+		"plan": ["更新脚本"],
+		"changes": [{"path": "res://tests/example.gd", "action": "update", "summary": "测试", "content": "extends Node"}],
+	}) + "\n```"
+	var parsed: Dictionary = PROPOSAL_PARSER.parse(response)
+	_check(not parsed.has("error"), "合法 JSON 提案应被解析")
+	var store: AIProposalStore = PROPOSAL_STORE.new()
+	store.begin_session(parsed.get("plan", []))
+	_check(store.add_changes(parsed.get("changes", [])) == 1, "合法 .gd 提案应被加入")
+	_check(store.proposals.size() == 1, "提案列表应有 1 项")
+	_check(store.add_changes([{"path": "res://../outside.gd", "action": "update", "content": "x"}]) == 0, "路径穿越提案必须被拒绝")
+	_check(store.add_changes([{"path": "res://scene.tscn", "action": "update", "content": "x"}]) == 0, "非 .gd 文件提案必须被拒绝")
 
 
 func _check(cond: bool, msg: String) -> void:

@@ -8,6 +8,7 @@ extends VBoxContainer
 ## - 发送当前脚本给 AI 让其分析
 
 const LLM_CLIENT_SCRIPT := preload("res://addons/ai_assistant/client/llm_client.gd")
+const SESSION_CONFIG := preload("res://addons/ai_assistant/editor/session_config.gd")
 
 # 注：不再有 DEFAULT_BASE_URL / DEFAULT_MODEL 常量——面板首次打开 Base URL 与模型留空，
 # 用占位符提示，避免「首开凭空出现一个没填过的地址/模型」的困惑；保存过什么就显示什么。
@@ -50,6 +51,11 @@ var _stream_buffer := ""
 var _last_answer := ""
 var _last_code_blocks: Array = []
 var _custom_model_item_index := -1
+var _reasoning_visible := false
+var _reasoning_buffer := ""
+var _reasoning_rendered := false
+var _reasoning_check: CheckButton
+var _stop_btn: Button
 
 
 func _ready() -> void:
@@ -72,6 +78,7 @@ func _ready() -> void:
 	_client.reasoning_chunk.connect(_on_reasoning_chunk)
 	_client.request_finished.connect(_on_finished)
 	_client.models_loaded.connect(_on_models_loaded)
+	SESSION_CONFIG.capture(_client)
 
 	_build_ui()
 	_apply_config_to_ui()
@@ -209,6 +216,11 @@ func _build_ui() -> void:
 	_stream_check.tooltip_text = "打字机式流式输出"
 	_stream_check.toggled.connect(_on_stream_toggled)
 	toolbar.add_child(_stream_check)
+	_reasoning_check = CheckButton.new()
+	_reasoning_check.text = "🧠 思考"
+	_reasoning_check.tooltip_text = "默认收起模型思考内容；需要时可展开查看。"
+	_reasoning_check.toggled.connect(_on_reasoning_toggled)
+	toolbar.add_child(_reasoning_check)
 	var clear_btn := Button.new()
 	clear_btn.text = "清空"
 	clear_btn.pressed.connect(_clear_chat)
@@ -243,6 +255,11 @@ func _build_ui() -> void:
 	_send_btn.text = "发送"
 	_send_btn.pressed.connect(func() -> void: _on_text_submitted(_input.text))
 	input_row.add_child(_send_btn)
+	_stop_btn = Button.new()
+	_stop_btn.text = "停止"
+	_stop_btn.tooltip_text = "停止当前模型请求，已收到的文本会保留。"
+	_stop_btn.pressed.connect(_cancel_request)
+	input_row.add_child(_stop_btn)
 	add_child(input_row)
 
 	var actions := HBoxContainer.new()
@@ -498,6 +515,7 @@ func _save_settings_from_window(url_edit: LineEdit, key_edit: LineEdit, model_ed
 	_client.max_tokens = int(tok_spin.value)
 	_client.timeout_seconds = timeout_spin.value
 	_client.system_prompt = sys_edit.text
+	SESSION_CONFIG.capture(_client)
 	if _client.api_key.is_empty():
 		_clear_cached_models()
 	_apply_config_to_ui()
@@ -516,6 +534,7 @@ func _clear_saved_key(key_edit: LineEdit) -> void:
 		_remember_key_check.set_pressed_no_signal(false)
 	key_edit.clear()
 	_client.api_key = ""
+	SESSION_CONFIG.capture(_client)
 	_set_status("已清除保存的 API Key", COLOR_OK)
 
 
@@ -686,6 +705,18 @@ func _on_stream_toggled(v: bool) -> void:
 	_save_setting("stream", v)
 
 
+func _on_reasoning_toggled(show: bool) -> void:
+	_reasoning_visible = show
+	if show and not _reasoning_buffer.is_empty() and not _reasoning_rendered:
+		_log.append_text("\n[color=%s][i]🧠 思考过程\n%s[/i][/color]\n" % [_color_str(COLOR_REASONING), _escape_bbcode(_reasoning_buffer)])
+		_reasoning_rendered = true
+
+
+func _cancel_request() -> void:
+	if _busy:
+		_client.cancel()
+
+
 func _on_text_submitted(text: String) -> void:
 	var t := text.strip_edges()
 	if t.is_empty():
@@ -700,6 +731,8 @@ func _on_text_submitted(text: String) -> void:
 	_append_user(t)
 	_stream_buffer = ""
 	_streamed_any = false
+	_reasoning_buffer = ""
+	_reasoning_rendered = false
 	_set_busy(true)
 	_client.chat(t)
 
@@ -748,6 +781,8 @@ func _send_current_script() -> void:
 	_append_user(msg)
 	_stream_buffer = ""
 	_streamed_any = false
+	_reasoning_buffer = ""
+	_reasoning_rendered = false
 	_set_busy(true)
 	_client.chat(msg)
 	_set_status("已发送脚本 %s" % script.resource_path.get_file(), COLOR_STATUS)
@@ -780,9 +815,13 @@ func _on_stream_chunk(text: String) -> void:
 
 
 func _on_reasoning_chunk(text: String) -> void:
-	if _stream_buffer.is_empty() or not _stream_buffer.ends_with("\n"):
-		_log.append_text("\n")
-	_log.append_text("[color=%s][i]🧠 %s[/i][/color]" % [_color_str(COLOR_REASONING), _escape_bbcode(text)])
+	_reasoning_buffer += text
+	if _reasoning_visible:
+		if not _reasoning_rendered:
+			_log.append_text("\n[color=%s][i]🧠 思考过程\n%s[/i][/color]" % [_color_str(COLOR_REASONING), _escape_bbcode(_reasoning_buffer)])
+			_reasoning_rendered = true
+		else:
+			_log.append_text(_escape_bbcode(text))
 
 
 func _on_finished(success: bool, error_message: String) -> void:
@@ -799,6 +838,8 @@ func _on_finished(success: bool, error_message: String) -> void:
 		_log.append_text(_markdown_to_bbcode(_last_answer) + "\n")
 	else:
 		_log.append_text("\n")
+	if not _reasoning_buffer.is_empty() and not _reasoning_visible:
+		_log.append_text("[color=%s][i]🧠 思考过程已收起（%d 字），打开「思考」可查看。[/i][/color]\n" % [_color_str(COLOR_REASONING), _reasoning_buffer.length()])
 	var tail := "完成"
 	if not _last_code_blocks.is_empty():
 		tail = "完成 · %d 个代码块" % _last_code_blocks.size()
@@ -808,6 +849,8 @@ func _on_finished(success: bool, error_message: String) -> void:
 func _set_busy(b: bool) -> void:
 	_busy = b
 	_send_btn.disabled = b  # 忙时禁用发送按钮；输入框仍可继续输入（回车会提示"上一请求进行中"）
+	if _stop_btn != null:
+		_stop_btn.disabled = not b
 
 
 func _set_status(text: String, color: Color) -> void:

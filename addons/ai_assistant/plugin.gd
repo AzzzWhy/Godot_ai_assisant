@@ -8,6 +8,8 @@ extends EditorPlugin
 const AUTOLOAD_NAME := "AI"
 const AUTOLOAD_PATH := "res://addons/ai_assistant/autoload/ai_assistant.gd"
 const DOCK_SCRIPT_PATH := "res://addons/ai_assistant/editor/ai_chat_dock.gd"
+const TASK_DOCK_SCRIPT_PATH := "res://addons/ai_assistant/editor/task_dock.gd"
+const VCS_DOCK_SCRIPT_PATH := "res://addons/ai_assistant/editor/vcs_panel.gd"
 const PLUGIN_ICON_PATH := "res://addons/ai_assistant/icon.svg"
 
 ## 运行时（游戏内）使用的 ProjectSettings 默认值
@@ -34,9 +36,12 @@ const EDITOR_SETTINGS := {
 	"ai_assistant/system_prompt": "你是一个嵌入在 Godot 游戏引擎中的 AI 编程助手。你精通 GDScript、Godot 4.x 引擎 API、游戏设计与 AI 集成。回答尽量简洁，给出可直接运行的代码，默认使用中文。",
 	"ai_assistant/managed_autoload": false,
 	"ai_assistant/remember_api_key": false,
+	"ai_assistant/permission_mode": "review",
 }
 
 var _dock: Control = null
+var _task_dock: Control = null
+var _vcs_dock: Control = null
 
 
 func _enter_tree() -> void:
@@ -47,15 +52,31 @@ func _enter_tree() -> void:
 	var dock := _build_dock()
 	if dock != null:
 		add_control_to_dock(EditorPlugin.DOCK_SLOT_RIGHT_BL, dock)
+	_task_dock = _build_panel(TASK_DOCK_SCRIPT_PATH, "AI 任务")
+	if _task_dock != null:
+		add_control_to_bottom_panel(_task_dock, "AI 任务")
+	_vcs_dock = _build_panel(VCS_DOCK_SCRIPT_PATH, "版本控制")
+	if _vcs_dock != null:
+		add_control_to_bottom_panel(_vcs_dock, "版本控制")
 	# 菜单入口：即使面板被关闭/隐藏，也能从这里重新打开
 	add_tool_menu_item("打开 AI 助手面板", Callable(self, "_reopen_dock"))
 	add_tool_menu_item("AI 助手设置…", Callable(self, "_open_dock_settings"))
+	add_tool_menu_item("AI 为当前节点创建脚本提案", Callable(self, "_open_node_task"))
 
 
 func _exit_tree() -> void:
 	if has_method("remove_tool_menu_item"):
 		remove_tool_menu_item("打开 AI 助手面板")
 		remove_tool_menu_item("AI 助手设置…")
+		remove_tool_menu_item("AI 为当前节点创建脚本提案")
+	if _task_dock != null:
+		remove_control_from_bottom_panel(_task_dock)
+		_task_dock.queue_free()
+		_task_dock = null
+	if _vcs_dock != null:
+		remove_control_from_bottom_panel(_vcs_dock)
+		_vcs_dock.queue_free()
+		_vcs_dock = null
 	if _dock != null:
 		remove_control_from_docks(_dock)
 		_dock.queue_free()
@@ -79,6 +100,19 @@ func _build_dock() -> Control:
 	return _dock
 
 
+func _build_panel(path: String, panel_name: String) -> Control:
+	var script: Script = load(path)
+	if script == null:
+		push_error("AI 助手：无法加载 %s（%s）。" % [panel_name, path])
+		return null
+	var panel := script.new()
+	if panel == null:
+		push_error("AI 助手：无法创建 %s。" % panel_name)
+		return null
+	panel.name = panel_name
+	return panel
+
+
 ## 从「项目」菜单重新打开聊天面板（面板被关闭时也有效）
 func _reopen_dock() -> void:
 	var dock := _build_dock()
@@ -95,6 +129,11 @@ func _open_dock_settings() -> void:
 	_reopen_dock()
 	if _dock != null and _dock.has_method("open_settings_dialog"):
 		_dock.open_settings_dialog()
+
+
+func _open_node_task() -> void:
+	if _task_dock != null and _task_dock.has_method("open_node_script_task"):
+		_task_dock.open_node_script_task(null)
 
 
 func get_plugin_name() -> String:

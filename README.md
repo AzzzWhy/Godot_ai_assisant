@@ -1,4 +1,4 @@
-# Godot_ai_assisant
+# Godot AI Assistant
 
 一个简单的Godot插件，可以实现将任意 _OpenAI兼容的_ 大模型接入Godot之中以此来辅助完成基本的脚本文件。
 
@@ -7,6 +7,19 @@
 - 编辑器内聊天面板：右侧Dock直接对话、流式输出、让AI分析脚本、一键把生成的GDScript插入当前脚本。
 - 任何 OpenAI 兼容桌面：DeepSeek、OpenAI、Kimi(Moonshot)、通义千问、智谱 GLM、本地 Ollama、vLLM 等，仅需修改base_url。
 - 模型自动识别：填入Key + 地址后自动拉取该账号真实可用的模型列表。
+
+## V2.0：审查优先的 AI 工作流
+
+V2 不让模型直接修改工程。它把 AI 改动变成可检查、可选择、可回滚的提案：
+
+- **AI 任务**：输入需求，必要时读取当前场景节点上下文。模型先给出计划和 JSON 脚本提案。
+- **提案 → 应用**：每个提案展示路径、操作和摘要；可逐项应用、跳过或应用全部安全项。删除脚本必须单独确认。
+- **会话回滚**：每次写入前自动保存原始脚本；「回滚本轮」可还原本轮已应用的脚本改动。
+- **脚本边界**：AI 提案仅允许 `res://` 下的 `.gd` 文件，不能生成终端命令或直接写入其他资源。
+- **节点脚本**：项目菜单「AI 为当前节点创建脚本提案」会采集节点、场景、父子节点、信号和已有脚本；可在应用后显式挂载脚本。
+- **版本控制**：底部「版本控制」面板显示状态与逐行 diff，支持暂存、取消暂存、丢弃改动、提交和历史。
+- **AI 提交信息**：只将已暂存 diff 发送给模型生成提交信息，绝不自动提交。
+- **思考内容**：默认收起，通过「🧠 思考」查看；聊天请求可点击「停止」中断。
 
 ---
 
@@ -60,6 +73,10 @@
 | `addons/ai_assistant/autoload/ai_assistant.gd` | 全局单例，提供运行时 AI 调用接口           |
 | `addons/ai_assistant/client/llm_client.gd`     | OpenAI 兼容大模型客户端（支持流式 SSE）    |
 | `addons/ai_assistant/editor/ai_chat_dock.gd`   | 编辑器底部/侧边栏的 AI 对话面板            |
+| `addons/ai_assistant/editor/task_dock.gd`      | 计划、节点上下文与安全改动提案面板          |
+| `addons/ai_assistant/agent/proposal_store.gd` | `.gd` 提案、快照、应用与会话回滚            |
+| `addons/ai_assistant/editor/vcs_panel.gd`      | 版本控制、差异审查和 AI 提交信息            |
+| `addons/ai_assistant/editor/git_bridge.gd`     | 固定 Git 子命令的后台执行封装               |
 
 ---
 
@@ -82,6 +99,8 @@
 - **导出后插件报错：** 编辑器面板（`EditorPlugin` 相关代码）只在编辑器里加载，不会进入导出包；运行时只依赖 `client/llm_client.gd` 与 `autoload/ai_assistant.gd`，可放心导出。
 
 - **生产环境 不要！ 不要！ 别把 API Key 写进 `project.godot` 提交仓库，用环境变量注入；**
+- **V2 的 AI 任务默认不会写文件。** 只有在「改动提案」中明确点击应用才会写入；删除需要二次确认；建议在应用前使用项目自己的 Git 工作流。
+- **首次使用 V2：** 在 Godot 4.x 中启用插件后，检查底部是否出现「AI 任务」和「版本控制」；再运行 `tests/smoke_test.gd` 的无网络冒烟测试。
 
 ---
 
