@@ -105,7 +105,7 @@ func _build_panel(path: String, panel_name: String) -> Control:
 	if script == null:
 		push_error("AI 助手：无法加载 %s（%s）。" % [panel_name, path])
 		return null
-	var panel := script.new()
+	var panel: Control = script.new() as Control
 	if panel == null:
 		push_error("AI 助手：无法创建 %s。" % panel_name)
 		return null

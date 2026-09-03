@@ -114,14 +114,18 @@ func _load_selected_node(explicit_node: Node = null) -> void:
 
 func _load_config() -> void:
 	var settings := EditorInterface.get_editor_settings()
-	_client.base_url = String(settings.get_setting("ai_assistant/base_url", ""))
-	_client.api_key = String(settings.get_setting("ai_assistant/api_key", ""))
-	_client.model = String(settings.get_setting("ai_assistant/model", ""))
-	_client.temperature = float(settings.get_setting("ai_assistant/temperature", 0.2))
-	_client.max_tokens = int(settings.get_setting("ai_assistant/max_tokens", 0))
-	_client.timeout_seconds = float(settings.get_setting("ai_assistant/timeout", 90.0))
+	_client.base_url = String(_setting_value(settings, "ai_assistant/base_url", ""))
+	_client.api_key = String(_setting_value(settings, "ai_assistant/api_key", ""))
+	_client.model = String(_setting_value(settings, "ai_assistant/model", ""))
+	_client.temperature = float(_setting_value(settings, "ai_assistant/temperature", 0.2))
+	_client.max_tokens = int(_setting_value(settings, "ai_assistant/max_tokens", 0))
+	_client.timeout_seconds = float(_setting_value(settings, "ai_assistant/timeout", 90.0))
 	_client.system_prompt = "你是谨慎的 Godot 4.x 编程助手。只提供可审查的 JSON 脚本提案。"
 	SESSION_CONFIG.apply_to(_client)
+
+
+func _setting_value(settings: EditorSettings, key: String, fallback: Variant) -> Variant:
+	return settings.get_setting(key) if settings.has_setting(key) else fallback
 
 
 func _run_plan() -> void:

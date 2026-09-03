@@ -192,12 +192,16 @@ func _ask_commit_ai(diff: String) -> void:
 
 func _load_ai_config() -> void:
 	var settings := EditorInterface.get_editor_settings()
-	_client.base_url = String(settings.get_setting("ai_assistant/base_url", ""))
-	_client.api_key = String(settings.get_setting("ai_assistant/api_key", ""))
-	_client.model = String(settings.get_setting("ai_assistant/model", ""))
+	_client.base_url = String(_setting_value(settings, "ai_assistant/base_url", ""))
+	_client.api_key = String(_setting_value(settings, "ai_assistant/api_key", ""))
+	_client.model = String(_setting_value(settings, "ai_assistant/model", ""))
 	_client.temperature = 0.2
-	_client.timeout_seconds = float(settings.get_setting("ai_assistant/timeout", 90.0))
+	_client.timeout_seconds = float(_setting_value(settings, "ai_assistant/timeout", 90.0))
 	SESSION_CONFIG.apply_to(_client)
+
+
+func _setting_value(settings: EditorSettings, key: String, fallback: Variant) -> Variant:
+	return settings.get_setting(key) if settings.has_setting(key) else fallback
 
 
 func _on_ai_finished(success: bool, error_message: String) -> void:
