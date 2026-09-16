@@ -6,6 +6,7 @@ const BRIDGE := preload("res://addons/ai_assistant/editor/git_bridge.gd")
 const DIFF_VIEW := preload("res://addons/ai_assistant/editor/diff_view.gd")
 const CLIENT := preload("res://addons/ai_assistant/client/llm_client.gd")
 const SESSION_CONFIG := preload("res://addons/ai_assistant/editor/session_config.gd")
+const THEME := preload("res://addons/ai_assistant/editor/ui_theme.gd")
 
 var _git: AIGitBridge
 var _client: AILLMClient
@@ -32,22 +33,32 @@ func _ready() -> void:
 
 
 func _build_ui() -> void:
+	add_theme_constant_override("separation", 8)
+	var title := Label.new()
+	title.text = "版本控制"
+	THEME.apply_label(title, false, 16)
+	add_child(title)
 	var toolbar := HBoxContainer.new()
+	toolbar.add_theme_constant_override("separation", 6)
 	var refresh := Button.new()
 	refresh.text = "刷新"
+	THEME.apply_button(refresh, "ghost")
 	refresh.pressed.connect(_refresh)
 	toolbar.add_child(refresh)
 	var stage := Button.new()
 	stage.text = "暂存"
+	THEME.apply_button(stage)
 	stage.pressed.connect(func() -> void: _run_selected("stage"))
 	toolbar.add_child(stage)
 	var unstage := Button.new()
 	unstage.text = "取消暂存"
+	THEME.apply_button(unstage, "ghost")
 	unstage.pressed.connect(func() -> void: _run_selected("unstage"))
 	toolbar.add_child(unstage)
 	var discard := Button.new()
 	discard.text = "丢弃工作区改动"
 	discard.tooltip_text = "仅对已跟踪文件有效；此操作会覆盖磁盘内容。"
+	THEME.apply_button(discard, "danger")
 	discard.pressed.connect(func() -> void: _run_selected("discard"))
 	toolbar.add_child(discard)
 	add_child(toolbar)
@@ -67,18 +78,22 @@ func _build_ui() -> void:
 	_message = LineEdit.new()
 	_message.placeholder_text = "提交信息（例如 feat: add proposal review）"
 	_message.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	THEME.apply_line_edit(_message)
 	commit_row.add_child(_message)
 	var generate := Button.new()
 	generate.text = "AI 生成"
 	generate.tooltip_text = "仅根据已暂存 diff 生成提交信息，不会自动提交。"
+	THEME.apply_button(generate)
 	generate.pressed.connect(_generate_commit_message)
 	commit_row.add_child(generate)
 	var commit := Button.new()
 	commit.text = "提交"
+	THEME.apply_button(commit, "primary")
 	commit.pressed.connect(_commit)
 	commit_row.add_child(commit)
 	var history := Button.new()
 	history.text = "历史"
+	THEME.apply_button(history, "ghost")
 	history.pressed.connect(_history)
 	commit_row.add_child(history)
 	add_child(commit_row)
@@ -177,7 +192,7 @@ func _on_file_selected(index: int) -> void:
 func _generate_commit_message() -> void:
 	_load_ai_config()
 	if _client.api_key.is_empty() or _client.base_url.is_empty() or _client.model.is_empty():
-		_set_status("请先在 AI 助手设置中配置模型。", true)
+		_set_status("请先在 AI 工作台设置中配置模型。", true)
 		return
 	_run("ai_diff", PackedStringArray(["diff", "--cached"]))
 

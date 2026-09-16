@@ -1,3 +1,4 @@
+@tool
 class_name AILLMClient
 extends Node
 ## 任意 OpenAI 兼容接口的异步 LLM 客户端。

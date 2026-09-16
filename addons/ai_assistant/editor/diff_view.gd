@@ -15,4 +15,14 @@ func render_diff(diff: String) -> void:
 			color = "86efac"
 		elif line.begins_with("-"):
 			color = "fca5a5"
-		append_text("[color=#%s]%s[/color]\n" % [color, line.replace("[", "[lb]").replace("]", "[rb]")])
+		append_text("[color=#%s]%s[/color]\n" % [color, _escape_bbcode(line)])
+
+
+func _escape_bbcode(text: String) -> String:
+	return (
+		text
+		.replace("[", "\u0001")
+		.replace("]", "\u0002")
+		.replace("\u0001", "[lb]")
+		.replace("\u0002", "[rb]")
+	)

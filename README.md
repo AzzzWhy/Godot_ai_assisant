@@ -1,111 +1,116 @@
 # Godot AI Assistant
 
-一个简单的Godot插件，可以实现将任意 _OpenAI兼容的_ 大模型接入Godot之中以此来辅助完成基本的脚本文件。
+面向 Godot 4.6 的 OpenAI 兼容 AI 编程插件。它把 Chat、脚本生成、代码审查和节点脚本绑定集中到可拖动的「AI 工作台」悬浮窗口中。
 
-## 已实现功能：
+## AI 工作台
 
-- 编辑器内聊天面板：右侧Dock直接对话、流式输出、让AI分析脚本、一键把生成的GDScript插入当前脚本。
-- 任何 OpenAI 兼容桌面：DeepSeek、OpenAI、Kimi(Moonshot)、通义千问、智谱 GLM、本地 Ollama、vLLM 等，仅需修改base_url。
-- 模型自动识别：填入Key + 地址后自动拉取该账号真实可用的模型列表。
+工作台是独立悬浮窗口（默认约 1280×720），可通过编辑器顶部工具栏按钮或「项目 → 工具 → 打开 AI 工作台」打开。布局接近 Godot 编辑器：左侧任务 Dock、中间结果视口、右侧对话 Inspector。
 
-## V2.0：审查优先的 AI 工作流
+- 左侧：锁定的场景/节点上下文、任务状态机和 AI 执行计划。
+- 中间：受影响文件、完整 Before/After、统一 Diff 和节点操作卡。
+- 右侧：Chat/Builder 模式、当前编辑器上下文、对话记录和任务输入框。
+- 底部：本轮唯一的「撤销全部 / 应用全部」审查栏。
 
-V2 不让模型直接修改工程。它把 AI 改动变成可检查、可选择、可回滚的提案：
+### Builder
 
-- **AI 任务**：输入需求，必要时读取当前场景节点上下文。模型先给出计划和 JSON 脚本提案。
-- **提案 → 应用**：每个提案展示路径、操作和摘要；可逐项应用、跳过或应用全部安全项。删除脚本必须单独确认。
-- **会话回滚**：每次写入前自动保存原始脚本；「回滚本轮」可还原本轮已应用的脚本改动。
-- **脚本边界**：AI 提案仅允许 `res://` 下的 `.gd` 文件，不能生成终端命令或直接写入其他资源。
-- **节点脚本**：项目菜单「AI 为当前节点创建脚本提案」会采集节点、场景、父子节点、信号和已有脚本；可在应用后显式挂载脚本。
-- **版本控制**：底部「版本控制」面板显示状态与逐行 diff，支持暂存、取消暂存、丢弃改动、提交和历史。
-- **AI 提交信息**：只将已暂存 diff 发送给模型生成提交信息，绝不自动提交。
-- **思考内容**：默认收起，通过「🧠 思考」查看；聊天请求可点击「停止」中断。
+选中一个场景节点，然后用一句话描述完整任务，例如：
 
----
+> 给 Player 写一个 CharacterBody2D 移动脚本并绑定，支持 WASD 和可调速度。
 
-## 一，快速开始
+Builder 会按以下流程执行：
 
-1，测试阶段：使用Godot 4.x打开本项目文件夹（GodotAIAssistant/，里面自带project.godot）。插件已自动添加：编辑器右侧会出现「AI助手」面板，接入api以及地址，选取模型进行测试。
+1. 锁定任务发送时的场景、节点路径和脚本版本。
+2. 生成计划、多文件 `changes[]` 和节点 `node_operations[]`。
+3. 在内存中构建草稿，不立即修改项目。
+4. 在独立结果区展示完整源码与 Diff。
+5. 点击一次「应用全部」后创建/更新脚本、绑定选中节点并保存场景。
+6. 任一步失败时恢复已写文件、编辑器内未保存脚本、节点脚本/导出属性和场景快照，避免半完成状态。
+7. 若编辑器在事务中断，恢复记录会跨插件重载保留；重新打开工作台后需先执行「Retry Rollback」才能开始新任务。
 
-2，将本项目文件夹内addons/ai_assistant作为插件导入godot之中，接入api以及地址，选取模型进行测试。
+更新已有脚本时，模型可以返回精确 `old_string/new_string` 编辑；只有唯一匹配才会生成草稿。Builder 当前只允许：
 
----
+- `res://` 下的 `.gd`；
+- `create` / `update`；
+- 给任务开始时选中的一个节点执行 `attach_script`。
 
-## 二，支持的后端配置速查
+它不会执行终端命令，也不会直接生成或改写 `.tscn` 文本。
 
-| 服务商                      | Base URL                                            | 模型示例                              | 说明              |
-| :-------------------------- | :-------------------------------------------------- | :------------------------------------ | :---------------- |
-| DeepSeek                    | `https://api.deepseek.com`                          | `deepseek-chat` / `deepseek-reasoner` | 默认配置          |
-| OpenAI                      | `https://api.openai.com/v1`                         | `gpt-4o-mini`                         |                   |
-| Kimi/Moonshot               | `https://api.moonshot.cn/v1`                        | `moonshot-v1-8k`                      |                   |
-| 智谱GLM                     | `https://open.bigmodel.cn/api/paas/v4`              | `glm-4-flash`                         |                   |
-| 通义千问                    | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus`                           |                   |
-| Ollama（本地免费）          | `http://127.0.0.1:11434/v1` 或者其他                | `qwen2.5:7b`                          | Key随便填个非空值 |
-| vLLM / 任何 OpenAI 兼容服务 | 你的服务地址                                        | 你的模型名                            |                   |
+### Chat
 
----
+Chat 用于只读问答，不写文件、不绑定节点。支持 OpenAI 兼容流式输出，Builder 有待审查草稿时会阻止切换执行，避免状态混淆。
 
-### 三，编辑器面板功能
+### 版本控制
 
-| 功能                                             | 位置                               |
-| :----------------------------------------------- | :--------------------------------- |
-| 对话（流式/非流式）                              | 输入框回车发送                     |
-| `/help` / `/clear` / `/script`                   | 快捷命令                           |
-| 自动识别本Key可用模型（保存设置后自动拉取）      | 设置→保存 / 点「刷新」             |
-| 「我的模型」收藏（不把API全部模型堆进下拉框）    | 设置→服务器模型「+加入」/「—移除」 |
-| 词                                               | 设置                               |
-| 快速切换模型                                     | 面板顶部下拉                       |
-| 发送当前脚本给AI分析                             | 面板按钮                           |
-| 把回复中的代码块插入当前脚本 / 另存为脚本 / 复制 | 面板底部                           |
-| 运行主场景（体验运行时对话）                     | 面板底部「运行场景」               |
+底部「版本控制」面板保持独立，提供状态、Diff、暂存、取消暂存、丢弃改动、提交和历史。AI 只根据已暂存 Diff 生成提交信息，不会自动提交。
 
----
+## 快速开始
 
-### 四，目录结构
+1. 使用 Godot 4.6 打开项目根目录 `GodotAIAssistant/`。
+2. 在「项目 → 项目设置 → 插件」启用 `AI Assistant (OpenAI Compatible)`。
+3. 点击顶部工具栏「AI 工作台」打开悬浮窗，再点「设置」。
+4. 填写 Base URL、API Key 和模型。
+5. 选中场景节点，在 Builder 中发送任务并审查结果。
 
-| 路径                                           | 说明                                       |
-| ---------------------------------------------- | ------------------------------------------ |
-| `project.godot`                                | Godot 项目配置文件                         |
-| `examples/npc_demo.gd/.tscn`                   | 游戏内 NPC 对话示例场景（可直接运行）      |
-| `addons/ai_assistant/plugin.cfg`               | 插件基本信息（名称、版本、作者等）         |
-| `addons/ai_assistant/plugin.gd`                | 编辑器插件入口，负责注册 AI 聊天面板和单例 |
-| `addons/ai_assistant/icon.svg`                 | 插件图标（在插件管理器中显示）             |
-| `addons/ai_assistant/autoload/ai_assistant.gd` | 全局单例，提供运行时 AI 调用接口           |
-| `addons/ai_assistant/client/llm_client.gd`     | OpenAI 兼容大模型客户端（支持流式 SSE）    |
-| `addons/ai_assistant/editor/ai_chat_dock.gd`   | 编辑器底部/侧边栏的 AI 对话面板            |
-| `addons/ai_assistant/editor/task_dock.gd`      | 计划、节点上下文与安全改动提案面板          |
-| `addons/ai_assistant/agent/proposal_store.gd` | `.gd` 提案、快照、应用与会话回滚            |
-| `addons/ai_assistant/editor/vcs_panel.gd`      | 版本控制、差异审查和 AI 提交信息            |
-| `addons/ai_assistant/editor/git_bridge.gd`     | 固定 Git 子命令的后台执行封装               |
+将插件用于其他项目时，复制 `addons/ai_assistant/` 到目标项目的 `addons/` 下，再从插件设置启用。
 
----
+## OpenAI 兼容后端
 
-### 五、常见问题
+- DeepSeek：`https://api.deepseek.com`
+- OpenAI：`https://api.openai.com/v1`
+- Moonshot/Kimi：`https://api.moonshot.cn/v1`
+- 智谱 GLM：`https://open.bigmodel.cn/api/paas/v4`
+- 通义千问：`https://dashscope.aliyuncs.com/compatible-mode/v1`
+- Ollama：`http://127.0.0.1:11434/v1`
+- vLLM 或其他兼容服务：填写对应兼容端点
 
-- **API Key ？** 默认不落盘，只在当前编辑器会话内存中使用。勾选设置里的「记住 API Key」后才会明文写入编辑器配置（macOS: `~/Library/Application Support/Godot/editor_settings-4.x.tres`）（windows：`C:\Users\<你的用户名>\AppData\Roaming\Godot\editor_settings-4.x.tres`），可随时点「清除已保存的 Key」删除。游戏运行时请用环境变量 `AI_API_KEY`。
+设置窗口可以请求服务端 `/models` 列表；不支持该接口的服务可直接手填模型名。
 
-- **HTTP 404: Base URL 填错。** Base URL 只需填到服务商根地址（可含 `/v1` 等前缀），不要把 `/chat/completions` 也拼进去。客户端会自动拼接并容错（即使误填了完整端点也能正确处理；报错信息里会带上实际请求的完整 URL）。
+## 安全边界
 
-- **HTTP 401: API Key 无效或服务商没给该接口权限；检查 Key、Base URL、模型名。** 设置窗口的「刷新」会直接用输入框里的 Key 请求（无需先保存），失败时显示服务商返回的具体原因。
+- API Key 默认只保存在当前编辑器会话内存。
+- 只有勾选「记住 API Key」才会明文写入 Godot 编辑器配置。
+- 不要把真实 Key 写入 `project.godot` 或提交到仓库。
+- Builder 草稿在点击「应用全部」前不会写入磁盘。
+- 应用前会再次检查文件、场景和节点是否仍与任务快照一致。
+- 路径校验会拒绝目录穿越、反斜杠、非 `.gd` 文件和逃逸项目目录的符号链接。
+- 文件采用临时文件、校验备份和重命名进行原子写入；多文件全部写入后才统一校验 GDScript 依赖。
+- 每个文件第一次写入前都会在 `user://godot_ai_assistant/snapshots` 保存回滚快照。
+- 未完成事务会记录到 `user://godot_ai_assistant/pending_recovery.json`；恢复完成后自动清除。
 
-- **模型列表加载失败 / 没有模型：** 部分服务商不支持 GET /models 接口——没关系，直接在「模型」输入框手动填模型名，或用「我的模型」收藏。
+游戏运行时仍可使用自动加载单例 `AI`；生产环境推荐通过 `AI_API_KEY`、`AI_BASE_URL` 和 `AI_MODEL` 环境变量注入配置。
 
-- **模型下拉里没有我想要的新模型：** 设置里「服务器模型 → 刷新」→「+加入」，面板下拉只显示你收藏的模型。
+## 主要代码
 
-- **请求超时：** `deepseek-reasoner` 思考较久，调大 `timeout`；或换成 `deepseek-chat`。
+- `addons/ai_assistant/plugin.gd`：悬浮窗、工具栏入口、设置默认值、VCS 面板和 Autoload 生命周期。
+- `addons/ai_assistant/editor/workbench_main.gd`：三栏 AI 工作台内容。
+- `addons/ai_assistant/editor/workbench_controller.gd`：唯一状态机、上下文快照、模型请求和 Apply/Rollback 事务。
+- `addons/ai_assistant/editor/result_preview.gd`：文件列表、完整源码、Diff 和节点操作卡。
+- `addons/ai_assistant/editor/task_timeline.gd`：任务计划和执行阶段。
+- `addons/ai_assistant/agent/builder_contract.gd`：多文件/节点操作 JSON 契约和校验。
+- `addons/ai_assistant/agent/proposal_store.gd`：内存草稿、路径沙箱、文件快照和原子应用。
+- `addons/ai_assistant/agent/inline_patch.gd`：唯一片段精确替换。
+- `addons/ai_assistant/client/llm_client.gd`：OpenAI 兼容请求、SSE 和模型列表。
+- `addons/ai_assistant/editor/vcs_panel.gd`：独立版本控制面板。
 
-- **连不上 Ollama：** 确认 `http://127.0.0.1:11434/v1`、`ollama serve` 已启动、模型已 `ollama pull`；Key 必须非空（填 `ollama` 即可）。
+旧的聊天 Dock、任务 Dock、逐提案应用和脚本顶部 Keep/Undo 已退役，避免同时存在多套修改入口。
 
-- **导出后插件报错：** 编辑器面板（`EditorPlugin` 相关代码）只在编辑器里加载，不会进入导出包；运行时只依赖 `client/llm_client.gd` 与 `autoload/ai_assistant.gd`，可放心导出。
+## 测试
 
-- **生产环境 不要！ 不要！ 别把 API Key 写进 `project.godot` 提交仓库，用环境变量注入；**
-- **V2 的 AI 任务默认不会写文件。** 只有在「改动提案」中明确点击应用才会写入；删除需要二次确认；建议在应用前使用项目自己的 Git 工作流。
-- **首次使用 V2：** 在 Godot 4.x 中启用插件后，检查底部是否出现「AI 任务」和「版本控制」；再运行 `tests/smoke_test.gd` 的无网络冒烟测试。
+离线冒烟测试：
 
----
+```bash
+godot --headless --path . -s res://tests/smoke_test.gd
+```
 
-### 七，licence
+本地 HTTP mock 集成测试：
 
----
+```bash
+python3 tests/mock_server.py
+godot --headless --path . -s res://tests/integration_test.gd
+```
 
-MIT开源协议，有任何问题欢迎提交PR
+冒烟测试覆盖 Builder 多文件解析、路径/符号链接沙箱、精确编辑、原子应用/回滚、场景与节点恢复、多文件依赖校验、跨重载事务恢复、审查前不落盘和工作台构建；集成测试覆盖 SSE、非流式 JSON、401 和模型列表。
+
+## License
+
+MIT
