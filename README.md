@@ -81,16 +81,18 @@ Chat 用于只读问答，不写文件、不绑定节点。支持 OpenAI 兼容�
 
 ## 主要代码
 
-- `addons/ai_assistant/plugin.gd`：悬浮窗、工具栏入口、设置默认值、VCS 面板和 Autoload 生命周期。
-- `addons/ai_assistant/editor/workbench_main.gd`：三栏 AI 工作台内容。
-- `addons/ai_assistant/editor/workbench_controller.gd`：唯一状态机、上下文快照、模型请求和 Apply/Rollback 事务。
-- `addons/ai_assistant/editor/result_preview.gd`：文件列表、完整源码、Diff 和节点操作卡。
-- `addons/ai_assistant/editor/task_timeline.gd`：任务计划和执行阶段。
-- `addons/ai_assistant/agent/builder_contract.gd`：多文件/节点操作 JSON 契约和校验。
-- `addons/ai_assistant/agent/proposal_store.gd`：内存草稿、路径沙箱、文件快照和原子应用。
-- `addons/ai_assistant/agent/inline_patch.gd`：唯一片段精确替换。
-- `addons/ai_assistant/client/llm_client.gd`：OpenAI 兼容请求、SSE 和模型列表。
-- `addons/ai_assistant/editor/vcs_panel.gd`：独立版本控制面板。
+完整文件职责和 v2.1.1 旧文件名对应关系见 [文件职责与命名](FILE_PURPOSES.md)。
+
+- `addons/ai_assistant/editor_plugin_entry.gd`：悬浮窗、工具栏入口、设置默认值、VCS 面板和 Autoload 生命周期。
+- `addons/ai_assistant/editor/ai_workbench_ui.gd`：三栏 AI 工作台内容。
+- `addons/ai_assistant/editor/workbench_task_controller.gd`：唯一状态机、上下文快照、模型请求和 Apply/Rollback 事务。
+- `addons/ai_assistant/editor/proposal_review_view.gd`：文件列表、完整源码、Diff 和节点操作卡。
+- `addons/ai_assistant/editor/builder_task_timeline.gd`：任务计划和执行阶段。
+- `addons/ai_assistant/agent/builder_response_contract.gd`：多文件/节点操作 JSON 契约和校验。
+- `addons/ai_assistant/agent/transactional_proposal_store.gd`：内存草稿、路径沙箱、文件快照和原子应用。
+- `addons/ai_assistant/agent/exact_text_patch.gd`：唯一片段精确替换。
+- `addons/ai_assistant/client/openai_compatible_chat_client.gd`：OpenAI 兼容请求、SSE 和模型列表。
+- `addons/ai_assistant/editor/version_control_panel.gd`：独立版本控制面板。
 
 旧的聊天 Dock、任务 Dock、逐提案应用和脚本顶部 Keep/Undo 已退役，避免同时存在多套修改入口。
 
@@ -99,14 +101,14 @@ Chat 用于只读问答，不写文件、不绑定节点。支持 OpenAI 兼容�
 离线冒烟测试：
 
 ```bash
-godot --headless --path . -s res://tests/smoke_test.gd
+godot --headless --path . -s res://tests/plugin_smoke_test.gd
 ```
 
 本地 HTTP mock 集成测试：
 
 ```bash
-python3 tests/mock_server.py
-godot --headless --path . -s res://tests/integration_test.gd
+python3 tests/chat_api_mock_server.py
+godot --headless --path . -s res://tests/chat_http_integration_test.gd
 ```
 
 冒烟测试覆盖 Builder 多文件解析、路径/符号链接沙箱、精确编辑、原子应用/回滚、场景与节点恢复、多文件依赖校验、跨重载事务恢复、审查前不落盘和工作台构建；集成测试覆盖 SSE、非流式 JSON、401 和模型列表。

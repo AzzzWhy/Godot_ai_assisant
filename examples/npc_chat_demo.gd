@@ -55,7 +55,7 @@ func _build_ui() -> void:
 	panel.add_child(title)
 
 	var hint := Label.new()
-	hint.text = "这是游戏运行时调用 AI 单例的例子，源码见 examples/npc_demo.gd"
+	hint.text = "这是游戏运行时调用 AI 单例的例子，源码见 examples/npc_chat_demo.gd"
 	hint.modulate = Color(0.7, 0.7, 0.7)
 	panel.add_child(hint)
 

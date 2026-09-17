@@ -3,17 +3,17 @@ extends SceneTree
 ## 验证 AILLMClient 的信号、请求队列、历史维护与 SSE 流式解析。
 ##
 ## 运行方式（项目根目录）：
-##   godot --headless --path . -s res://tests/smoke_test.gd
+##   godot --headless --path . -s res://tests/plugin_smoke_test.gd
 ## 退出码 0 = 全部通过。
 ##
 ## 注意：Godot 4.x 的 lambda 按值捕获局部变量，所以测试里用 Array/Dictionary
 ## 这类引用类型来累加/记录信号结果。
 
 var _fails := 0
-const PROPOSAL_STORE := preload("res://addons/ai_assistant/agent/proposal_store.gd")
-const INLINE_PATCH := preload("res://addons/ai_assistant/agent/inline_patch.gd")
-const BUILDER := preload("res://addons/ai_assistant/agent/builder_contract.gd")
-const WORKBENCH := preload("res://addons/ai_assistant/editor/workbench_main.gd")
+const PROPOSAL_STORE := preload("res://addons/ai_assistant/agent/transactional_proposal_store.gd")
+const INLINE_PATCH := preload("res://addons/ai_assistant/agent/exact_text_patch.gd")
+const BUILDER := preload("res://addons/ai_assistant/agent/builder_response_contract.gd")
+const WORKBENCH := preload("res://addons/ai_assistant/editor/ai_workbench_ui.gd")
 
 
 func _initialize() -> void:
@@ -428,6 +428,13 @@ func _test_workbench_builds() -> void:
 	_check(screen._settings_window != null, "应创建设置窗口")
 	_check(screen._settings_window.get_child_count() > 0, "设置窗口应包含表单内容")
 	_check(screen._url_edit != null and screen._key_edit != null, "设置窗口应包含 Base URL 和 API Key")
+	_check(
+		screen._settings_window.find_children("*", "ScrollContainer", true, false).size() > 0,
+		"设置内容应可滚动，避免底部表单被截断",
+	)
+	_check(screen._url_edit.get_theme_font_size("font_size") == 13, "设置输入框应使用工作台字号")
+	_check(screen._timeout.get_line_edit().get_theme_font_size("font_size") == 13, "设置数字框应使用工作台字号")
+	_check(screen._remember.get_theme_font_size("font_size") == 13, "设置复选框应使用工作台字号")
 	_check(screen._preview._tabs.current_tab == 1, "结果区应默认展示统一 Diff")
 	var diff: String = screen._preview._unified_diff("a\nb\nc\nd", "a\nB\nc\nD", "res://sample.gd")
 	_check(diff.contains("-b\n+B\n c\n-d\n+D"), "分散修改应逐行对比，保留中间未改动的代码")

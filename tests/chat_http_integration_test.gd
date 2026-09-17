@@ -1,10 +1,10 @@
 extends SceneTree
-## 端到端集成测试（需要 tests/mock_server.py 在 127.0.0.1:8765 运行）：
+## 端到端集成测试（需要 tests/chat_api_mock_server.py 在 127.0.0.1:8765 运行）：
 ## 走真实 HTTP 路径验证：流式 SSE、非流式 JSON、401 错误处理、队列。
 ##
 ## 运行方式：
-##   python3 tests/mock_server.py &   # 或后台任务
-##   godot --headless --path . -s res://tests/integration_test.gd
+##   python3 tests/chat_api_mock_server.py &   # 或后台任务
+##   godot --headless --path . -s res://tests/chat_http_integration_test.gd
 
 const BASE := "http://127.0.0.1:8765/v1"
 

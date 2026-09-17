@@ -2,11 +2,11 @@
 extends VBoxContainer
 ## Project-local source control panel. It exposes explicit user actions, never AI commands.
 
-const BRIDGE := preload("res://addons/ai_assistant/editor/git_bridge.gd")
-const DIFF_VIEW := preload("res://addons/ai_assistant/editor/diff_view.gd")
-const CLIENT := preload("res://addons/ai_assistant/client/llm_client.gd")
-const SESSION_CONFIG := preload("res://addons/ai_assistant/editor/session_config.gd")
-const THEME := preload("res://addons/ai_assistant/editor/ui_theme.gd")
+const BRIDGE := preload("res://addons/ai_assistant/editor/restricted_git_runner.gd")
+const DIFF_VIEW := preload("res://addons/ai_assistant/editor/colored_diff_view.gd")
+const CLIENT := preload("res://addons/ai_assistant/client/openai_compatible_chat_client.gd")
+const SESSION_CONFIG := preload("res://addons/ai_assistant/editor/editor_session_config.gd")
+const THEME := preload("res://addons/ai_assistant/editor/workbench_dark_theme.gd")
 
 var _git: AIGitBridge
 var _client: AILLMClient

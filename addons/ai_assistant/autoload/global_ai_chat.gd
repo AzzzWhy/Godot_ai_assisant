@@ -1,4 +1,4 @@
-extends "res://addons/ai_assistant/client/llm_client.gd"
+extends "res://addons/ai_assistant/client/openai_compatible_chat_client.gd"
 ## 全局 AI 单例（Autoload 名称：AI）。
 ##
 ## 插件启用时自动注册；也可手动在「项目设置 -> 全局」Autoload 中注册本文件。

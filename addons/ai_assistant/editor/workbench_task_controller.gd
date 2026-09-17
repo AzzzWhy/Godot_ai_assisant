@@ -11,12 +11,12 @@ signal draft_changed
 signal context_changed(context: Dictionary)
 signal models_loaded(models: Array, error_message: String)
 
-const CLIENT_SCRIPT := preload("res://addons/ai_assistant/client/llm_client.gd")
-const BUILDER := preload("res://addons/ai_assistant/agent/builder_contract.gd")
-const INLINE_PATCH := preload("res://addons/ai_assistant/agent/inline_patch.gd")
-const STORE_SCRIPT := preload("res://addons/ai_assistant/agent/proposal_store.gd")
-const SESSION_CONFIG := preload("res://addons/ai_assistant/editor/session_config.gd")
-const SCENE_CONTEXT := preload("res://addons/ai_assistant/editor/scene_context.gd")
+const CLIENT_SCRIPT := preload("res://addons/ai_assistant/client/openai_compatible_chat_client.gd")
+const BUILDER := preload("res://addons/ai_assistant/agent/builder_response_contract.gd")
+const INLINE_PATCH := preload("res://addons/ai_assistant/agent/exact_text_patch.gd")
+const STORE_SCRIPT := preload("res://addons/ai_assistant/agent/transactional_proposal_store.gd")
+const SESSION_CONFIG := preload("res://addons/ai_assistant/editor/editor_session_config.gd")
+const SCENE_CONTEXT := preload("res://addons/ai_assistant/editor/selected_scene_summary.gd")
 
 const IDLE := "idle"
 const PLANNING := "planning"

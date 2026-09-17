@@ -3,10 +3,10 @@ extends EditorPlugin
 ## Plugin shell: floating AI workbench window, optional VCS bottom panel, runtime autoload.
 
 const AUTOLOAD_NAME := "AI"
-const AUTOLOAD_PATH := "res://addons/ai_assistant/autoload/ai_assistant.gd"
-const WORKBENCH_PATH := "res://addons/ai_assistant/editor/workbench_main.gd"
-const VCS_PANEL_PATH := "res://addons/ai_assistant/editor/vcs_panel.gd"
-const PLUGIN_ICON_PATH := "res://addons/ai_assistant/icon.svg"
+const AUTOLOAD_PATH := "res://addons/ai_assistant/autoload/global_ai_chat.gd"
+const WORKBENCH_PATH := "res://addons/ai_assistant/editor/ai_workbench_ui.gd"
+const VCS_PANEL_PATH := "res://addons/ai_assistant/editor/version_control_panel.gd"
+const PLUGIN_ICON_PATH := "res://addons/ai_assistant/workbench_toolbar_icon.svg"
 
 const WINDOW_SIZE_SETTING := "ai_assistant/workbench_window_size"
 const WINDOW_POSITION_SETTING := "ai_assistant/workbench_window_position"

@@ -3,8 +3,8 @@ class_name AIResultPreview
 extends VBoxContainer
 ## Dedicated result surface: files, full source comparison, unified diff and node operations.
 
-const THEME := preload("res://addons/ai_assistant/editor/ui_theme.gd")
-const DIFF_VIEW := preload("res://addons/ai_assistant/editor/diff_view.gd")
+const THEME := preload("res://addons/ai_assistant/editor/workbench_dark_theme.gd")
+const DIFF_VIEW := preload("res://addons/ai_assistant/editor/colored_diff_view.gd")
 
 var _controller: AIWorkbenchController
 var _summary: Label

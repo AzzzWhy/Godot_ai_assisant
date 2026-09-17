@@ -26,12 +26,13 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 [application]
 
 config/name="Godot AI Assistant"
-run/main_scene="res://examples/npc_demo.tscn"
+run/main_scene="res://examples/npc_chat_demo.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
+config/icon="res://project_icon.svg"
 
 [autoload]
 
-AI="*res://addons/ai_assistant/autoload/ai_assistant.gd"
+AI="*res://addons/ai_assistant/autoload/global_ai_chat.gd"
 
 [editor_plugins]
 

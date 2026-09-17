@@ -3,7 +3,7 @@ class_name AITaskTimeline
 extends VBoxContainer
 ## Left rail: locked editor context and the current Builder lifecycle.
 
-const THEME := preload("res://addons/ai_assistant/editor/ui_theme.gd")
+const THEME := preload("res://addons/ai_assistant/editor/workbench_dark_theme.gd")
 
 var _controller: AIWorkbenchController
 var _context_title: Label

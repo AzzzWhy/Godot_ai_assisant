@@ -95,6 +95,7 @@ static func apply_line_edit(edit: Control) -> void:
 	edit.add_theme_stylebox_override("focus", input_box())
 	edit.add_theme_color_override("font_color", FG)
 	edit.add_theme_color_override("font_placeholder_color", FG_MUTED)
+	edit.add_theme_font_size_override("font_size", 13)
 
 
 static func chip(text: String) -> PanelContainer:

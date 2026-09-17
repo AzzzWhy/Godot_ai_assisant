@@ -3,10 +3,10 @@ class_name AIWorkbenchMain
 extends Control
 ## Floating workbench content: task timeline, result review and Chat/Builder composer.
 
-const CONTROLLER_SCRIPT := preload("res://addons/ai_assistant/editor/workbench_controller.gd")
-const TIMELINE_SCRIPT := preload("res://addons/ai_assistant/editor/task_timeline.gd")
-const PREVIEW_SCRIPT := preload("res://addons/ai_assistant/editor/result_preview.gd")
-const THEME := preload("res://addons/ai_assistant/editor/ui_theme.gd")
+const CONTROLLER_SCRIPT := preload("res://addons/ai_assistant/editor/workbench_task_controller.gd")
+const TIMELINE_SCRIPT := preload("res://addons/ai_assistant/editor/builder_task_timeline.gd")
+const PREVIEW_SCRIPT := preload("res://addons/ai_assistant/editor/proposal_review_view.gd")
+const THEME := preload("res://addons/ai_assistant/editor/workbench_dark_theme.gd")
 const TASK_AUTO_COLLAPSE_WIDTH := 900.0
 const TASK_RAIL_MIN := 250.0
 const TASK_RAIL_MAX := 300.0
@@ -541,8 +541,8 @@ func _build_settings_window() -> void:
 	_settings_window.title = "AI 工作台设置"
 	var editor_scale := maxf(EditorInterface.get_editor_scale(), 1.0) if Engine.is_editor_hint() else 1.0
 	_settings_window.content_scale_factor = editor_scale
-	var settings_size := Vector2i(roundi(600 * editor_scale), roundi(650 * editor_scale))
-	var settings_minimum := Vector2i(roundi(520 * editor_scale), roundi(560 * editor_scale))
+	var settings_size := Vector2i(roundi(540 * editor_scale), roundi(560 * editor_scale))
+	var settings_minimum := Vector2i(roundi(460 * editor_scale), roundi(420 * editor_scale))
 	if Engine.is_editor_hint():
 		var usable := DisplayServer.screen_get_usable_rect(DisplayServer.SCREEN_OF_MAIN_WINDOW)
 		if usable.size.x > 0 and usable.size.y > 0:
@@ -569,11 +569,19 @@ func _build_settings_window() -> void:
 	margin.add_theme_constant_override("margin_top", 18)
 	margin.add_theme_constant_override("margin_bottom", 18)
 	panel.add_child(margin)
+	var layout := VBoxContainer.new()
+	layout.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	layout.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	layout.add_theme_constant_override("separation", 10)
+	margin.add_child(layout)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	layout.add_child(scroll)
 	var box := VBoxContainer.new()
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	box.add_theme_constant_override("separation", 10)
-	margin.add_child(box)
+	scroll.add_child(box)
 	var heading := Label.new()
 	heading.text = "模型连接"
 	THEME.apply_label(heading, false, 18)
@@ -601,6 +609,7 @@ func _build_settings_window() -> void:
 	model_row.add_child(server_label)
 	_server_models = OptionButton.new()
 	_server_models.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_server_models.add_theme_font_size_override("font_size", 13)
 	_server_models.item_selected.connect(func(index: int) -> void:
 		if index >= 0:
 			_model_edit.text = _server_models.get_item_text(index)
@@ -616,9 +625,11 @@ func _build_settings_window() -> void:
 	box.add_child(model_row)
 	_stream = CheckBox.new()
 	_stream.text = "Chat 使用流式输出"
+	_stream.add_theme_font_size_override("font_size", 13)
 	box.add_child(_stream)
 	_remember = CheckBox.new()
 	_remember.text = "记住 API Key（明文写入 Godot 编辑器配置）"
+	_remember.add_theme_font_size_override("font_size", 13)
 	box.add_child(_remember)
 	var prompt_label := Label.new()
 	prompt_label.text = "Chat 系统提示词"
@@ -642,7 +653,7 @@ func _build_settings_window() -> void:
 	THEME.apply_button(save, "primary")
 	save.pressed.connect(_save_settings)
 	buttons.add_child(save)
-	box.add_child(buttons)
+	layout.add_child(buttons)
 
 
 func _settings_line(grid: GridContainer, label_text: String, placeholder: String) -> LineEdit:
@@ -673,6 +684,7 @@ func _settings_spin(
 	spin.min_value = minimum
 	spin.max_value = maximum
 	spin.step = step
+	spin.get_line_edit().add_theme_font_size_override("font_size", 13)
 	grid.add_child(spin)
 	return spin
 
