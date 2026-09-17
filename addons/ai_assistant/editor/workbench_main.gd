@@ -539,8 +539,18 @@ func _attach_settings_window() -> void:
 func _build_settings_window() -> void:
 	_settings_window = Window.new()
 	_settings_window.title = "AI 工作台设置"
-	_settings_window.size = Vector2i(600, 650)
-	_settings_window.min_size = Vector2i(520, 560)
+	var editor_scale := maxf(EditorInterface.get_editor_scale(), 1.0) if Engine.is_editor_hint() else 1.0
+	_settings_window.content_scale_factor = editor_scale
+	var settings_size := Vector2i(roundi(600 * editor_scale), roundi(650 * editor_scale))
+	var settings_minimum := Vector2i(roundi(520 * editor_scale), roundi(560 * editor_scale))
+	if Engine.is_editor_hint():
+		var usable := DisplayServer.screen_get_usable_rect(DisplayServer.SCREEN_OF_MAIN_WINDOW)
+		if usable.size.x > 0 and usable.size.y > 0:
+			var available := Vector2i(maxi(1, usable.size.x - 40), maxi(1, usable.size.y - 40))
+			settings_size = settings_size.min(available)
+			settings_minimum = settings_minimum.min(available)
+	_settings_window.size = settings_size
+	_settings_window.min_size = settings_minimum
 	_settings_window.wrap_controls = false
 	_settings_window.transient = true
 	_settings_window.exclusive = false

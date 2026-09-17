@@ -20,6 +20,7 @@ func _initialize() -> void:
 	_test_no_key_fails_cleanly()
 	_test_sse_streaming()
 	_test_nonstream_json()
+	_test_completion_failures()
 	_test_queue_and_cleanup()
 	_test_proposal_contract()
 	_test_inline_patch()
@@ -109,6 +110,33 @@ func _test_nonstream_json() -> void:
 	client._extract_from_json('{"choices":[{"message":{"content":"整包回复","reasoning_content":"想法"}}]}')
 	_check(client.last_response_text == "整包回复", "整包解析正文错误: '%s'" % client.last_response_text)
 	_check(client.last_reasoning_text == "想法", "整包解析思考错误: '%s'" % client.last_reasoning_text)
+	client.free()
+
+
+func _test_completion_failures() -> void:
+	var client: AILLMClient = AILLMClient.new()
+	get_root().add_child(client)
+	var finished: Array = []
+	client.request_finished.connect(func(success: bool, error_message: String) -> void:
+		finished.append([success, error_message])
+	)
+	client._busy = true
+	client._finalized = false
+	client._handle_stream_event('data: {"choices":[{"delta":{"content":"半截"},"finish_reason":"length"}]}')
+	_check(
+		finished.size() == 1 and not finished[0][0] and String(finished[0][1]).contains("长度上限"),
+		"流式输出截断应明确报错，不能进入审查",
+	)
+	client._busy = true
+	client._finalized = false
+	client._stream_mode = true
+	client._status_code = 200
+	client._buffer = '{"choices":[{"message":{"content":"完整 JSON"},"finish_reason":"stop"}]}'
+	client._handle_body_end()
+	_check(
+		finished.size() == 2 and finished[1][0] and client.last_response_text == "完整 JSON",
+		"请求流式输出时，服务端返回整包 JSON 仍应正确解析",
+	)
 	client.free()
 
 
@@ -360,6 +388,18 @@ func _test_recovery_persistence() -> void:
 		and recovered.proposals.size() == 1,
 		"未解决事务应跨插件重载恢复并继续阻止新任务",
 	)
+	var recovery := recovered.recovery_data.duplicate(true)
+	recovery.scene_needs_restore = true
+	recovered.update_recovery_data(recovery)
+	var pending_scene := recovered.rollback_session_detailed()
+	_check(
+		not bool(pending_scene.get("ok", true))
+		and recovered.has_unresolved_transaction()
+		and FileAccess.file_exists(PROPOSAL_STORE.RECOVERY_FILE),
+		"场景仍待恢复时，文件回滚不能清除恢复记录",
+	)
+	recovery.scene_needs_restore = false
+	recovered.update_recovery_data(recovery)
 	recovered.rollback_session_detailed()
 	recovered.discard_draft()
 	_remove(path)
@@ -388,6 +428,9 @@ func _test_workbench_builds() -> void:
 	_check(screen._settings_window != null, "应创建设置窗口")
 	_check(screen._settings_window.get_child_count() > 0, "设置窗口应包含表单内容")
 	_check(screen._url_edit != null and screen._key_edit != null, "设置窗口应包含 Base URL 和 API Key")
+	_check(screen._preview._tabs.current_tab == 1, "结果区应默认展示统一 Diff")
+	var diff: String = screen._preview._unified_diff("a\nb\nc\nd", "a\nB\nc\nD", "res://sample.gd")
+	_check(diff.contains("-b\n+B\n c\n-d\n+D"), "分散修改应逐行对比，保留中间未改动的代码")
 	var path := "res://tests/__ai_controller_patch.gd"
 	var original := "extends Node\nvar speed := 1\n"
 	_remove(path)

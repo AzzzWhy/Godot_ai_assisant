@@ -291,7 +291,9 @@ func run_builder(request: String, selected_node: Node = null) -> bool:
 	_set_state(PLANNING, "正在理解任务和锁定上下文")
 	_client.stream = false
 	_client.system_prompt = ""
-	_set_state(GENERATING, "正在生成脚本和节点操作")
+	# Multi-file JSON responses routinely take longer than a short Chat reply.
+	_client.timeout_seconds = maxf(_client.timeout_seconds, 180.0)
+	_set_state(GENERATING, "正在生成脚本和节点操作（最长 %d 秒）" % int(_client.timeout_seconds))
 	_client.send_raw([{"role": "user", "content": BUILDER.prompt(task, context)}])
 	return true
 
@@ -688,8 +690,6 @@ func _restore_compatible_properties(node: Node, properties: Dictionary) -> void:
 
 func _rollback_transaction(reason: String) -> String:
 	var failures := PackedStringArray()
-	failures.append_array(_restore_node_scripts())
-	failures.append_array(_restore_script_sources())
 	if _scene_save_attempted:
 		var scene_path := String(captured_context.get("scene_path", ""))
 		if not store.restore_scene_snapshot(scene_path, _locked_scene_content):
@@ -708,6 +708,13 @@ func _rollback_transaction(reason: String) -> String:
 		elif file_failures is Array:
 			for failure in file_failures:
 				failures.append(String(failure))
+	# Restore disk dependencies before reloading the scripts attached to live nodes.
+	failures.append_array(_restore_script_sources())
+	failures.append_array(_restore_node_scripts())
+	if Engine.is_editor_hint():
+		# A rollback can remove newly created scripts. Refresh the FileSystem dock and
+		# resource imports after the transaction, outside the current import callback.
+		EditorInterface.get_resource_filesystem().call_deferred("scan")
 	if not failures.is_empty():
 		_rollback_incomplete = true
 		var unresolved_message := reason + "\n回滚未完整完成：" + ", ".join(failures)

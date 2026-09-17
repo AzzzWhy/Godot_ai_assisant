@@ -352,6 +352,8 @@ func rollback_session_detailed() -> Dictionary:
 		):
 			proposal.status = "rolled_back"
 			proposals[i] = proposal
+	if bool(recovery_data.get("scene_needs_restore", false)):
+		failures.append("场景快照仍待恢复")
 	rollback_incomplete = not failures.is_empty()
 	if rollback_incomplete:
 		_persist_recovery()

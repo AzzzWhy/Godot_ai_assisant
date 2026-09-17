@@ -18,6 +18,7 @@ var _node_list: VBoxContainer
 var _empty: CenterContainer
 var _content: HSplitContainer
 var _compare: HSplitContainer
+var _compare_split_initialized := false
 
 
 func _ready() -> void:
@@ -53,6 +54,11 @@ func _build_ui() -> void:
 	_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	THEME.apply_label(_summary, true, 13)
 	add_child(_summary)
+	var review_hint := Label.new()
+	review_hint.text = "先看统一 Diff；完整代码页可左右对照并同步滚动。拖动竖线仅调整列宽。"
+	review_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	THEME.apply_label(review_hint, true, 12)
+	add_child(review_hint)
 
 	_empty = CenterContainer.new()
 	_empty.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -98,16 +104,17 @@ func _build_ui() -> void:
 	_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_content.add_child(_tabs)
 	_compare = HSplitContainer.new()
-	_compare.name = "完整代码"
-	_compare.resized.connect(_update_split_layout)
+	_compare.name = "完整代码（同步滚动）"
 	_before = _code_view()
 	_after = _code_view()
 	_compare.add_child(_code_panel("修改前", _before, Color("#2b171a")))
 	_compare.add_child(_code_panel("生成后", _after, Color("#122117")))
+	_before.get_v_scroll_bar().value_changed.connect(_sync_after_scroll)
+	_after.get_v_scroll_bar().value_changed.connect(_sync_before_scroll)
 	_tabs.add_child(_compare)
 
 	_diff = DIFF_VIEW.new()
-	_diff.name = "Diff"
+	_diff.name = "统一 Diff（滚动查看）"
 	_diff.fit_content = false
 	_diff.scroll_active = true
 	_diff.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -122,6 +129,7 @@ func _build_ui() -> void:
 	_node_list.add_theme_constant_override("separation", 8)
 	operations_scroll.add_child(_node_list)
 	_tabs.add_child(operations_scroll)
+	_tabs.current_tab = 1
 	call_deferred("_update_split_layout")
 
 
@@ -129,8 +137,19 @@ func _update_split_layout() -> void:
 	if _content != null and _content.size.x > 0.0:
 		var file_width := clampf(_content.size.x * 0.28, 180.0, 240.0)
 		_content.split_offset = int(round(file_width))
-	if _compare != null and _compare.size.x > 0.0:
+	if _compare != null and _compare.size.x > 0.0 and not _compare_split_initialized:
 		_compare.split_offset = int(round(_compare.size.x * 0.5))
+		_compare_split_initialized = true
+
+
+func _sync_after_scroll(value: float) -> void:
+	if _after != null and not is_equal_approx(_after.scroll_vertical, value):
+		_after.scroll_vertical = value
+
+
+func _sync_before_scroll(value: float) -> void:
+	if _before != null and not is_equal_approx(_before.scroll_vertical, value):
+		_before.scroll_vertical = value
 
 
 func _render() -> void:
@@ -179,6 +198,8 @@ func _show_file(item_index: int) -> void:
 	var path := String(proposal.get("path", ""))
 	_before.text = before
 	_after.text = after
+	_before.scroll_vertical = 0.0
+	_after.scroll_vertical = 0.0
 	_highlight_changes(before, after)
 	_diff.render_diff(_unified_diff(before, after, path))
 
@@ -266,39 +287,45 @@ func _highlight_changes(before: String, after: String) -> void:
 func _unified_diff(before: String, after: String, path: String) -> String:
 	var old_lines := before.split("\n")
 	var new_lines := after.split("\n")
-	var prefix := 0
-	while prefix < old_lines.size() and prefix < new_lines.size() and old_lines[prefix] == new_lines[prefix]:
-		prefix += 1
-	var suffix := 0
-	while (
-		suffix < old_lines.size() - prefix
-		and suffix < new_lines.size() - prefix
-		and old_lines[old_lines.size() - 1 - suffix] == new_lines[new_lines.size() - 1 - suffix]
-	):
-		suffix += 1
-	var context_start := maxi(0, prefix - 3)
-	var old_change_end := old_lines.size() - suffix
-	var new_change_end := new_lines.size() - suffix
 	var lines := PackedStringArray([
 		"--- %s (修改前)" % path,
 		"+++ %s (生成后)" % path,
-		"@@ -%d,%d +%d,%d @@" % [
-			context_start + 1,
-			old_lines.size() - context_start,
-			context_start + 1,
-			new_lines.size() - context_start,
-		],
+		"@@ -1,%d +1,%d @@" % [old_lines.size(), new_lines.size()],
 	])
-	for i in range(context_start, prefix):
-		lines.append(" " + String(old_lines[i]))
-	for i in range(prefix, old_change_end):
-		lines.append("-" + String(old_lines[i]))
-	for i in range(prefix, new_change_end):
-		lines.append("+" + String(new_lines[i]))
-	for i in range(suffix - 1, -1, -1):
-		if i >= 3:
-			continue
-		lines.append(" " + String(new_lines[new_lines.size() - 1 - i]))
+	# For normal scripts, use a line-level LCS so separate edits remain separate.
+	# Bound the matrix for very large generated files; the fallback stays responsive.
+	var old_count := old_lines.size()
+	var new_count := new_lines.size()
+	if old_count * new_count > 250000:
+		lines.append(" 大文件：显示完整修改前后内容")
+		for line in old_lines:
+			lines.append("-" + String(line))
+		for line in new_lines:
+			lines.append("+" + String(line))
+		return "\n".join(lines)
+	var width := new_count + 1
+	var lcs := PackedInt32Array()
+	lcs.resize((old_count + 1) * width)
+	for i in range(old_count - 1, -1, -1):
+		for j in range(new_count - 1, -1, -1):
+			var index := i * width + j
+			if old_lines[i] == new_lines[j]:
+				lcs[index] = lcs[(i + 1) * width + j + 1] + 1
+			else:
+				lcs[index] = maxi(lcs[(i + 1) * width + j], lcs[i * width + j + 1])
+	var old_index := 0
+	var new_index := 0
+	while old_index < old_count or new_index < new_count:
+		if old_index < old_count and new_index < new_count and old_lines[old_index] == new_lines[new_index]:
+			lines.append(" " + String(old_lines[old_index]))
+			old_index += 1
+			new_index += 1
+		elif new_index < new_count and (old_index == old_count or lcs[old_index * width + new_index + 1] > lcs[(old_index + 1) * width + new_index]):
+			lines.append("+" + String(new_lines[new_index]))
+			new_index += 1
+		else:
+			lines.append("-" + String(old_lines[old_index]))
+			old_index += 1
 	return "\n".join(lines)
 
 

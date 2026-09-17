@@ -59,6 +59,7 @@ var _started_at_msec := 0
 var _last_status: HTTPClient.Status = HTTPClient.STATUS_DISCONNECTED
 var _last_user_message: Dictionary = {}
 var _last_url := ""  # 最近一次实际请求的完整 URL（用于错误诊断）
+var _completion_error := ""
 var _models_http: HTTPRequest = null
 var _fetching_models := false
 
@@ -196,6 +197,7 @@ func _pump() -> void:
 	_started_at_msec = Time.get_ticks_msec()
 	last_response_text = ""
 	last_reasoning_text = ""
+	_completion_error = ""
 	if api_key.strip_edges().is_empty():
 		_finalize(false, "未设置 API Key（api_key 为空）")
 		return
@@ -438,7 +440,11 @@ func _handle_stream_event(event: String) -> void:
 	if content != null and String(content) != "":
 		last_response_text += String(content)
 		stream_chunk.emit(String(content))
-	if choice.get("finish_reason") != null:
+	var finish_value: Variant = choice.get("finish_reason", null)
+	var finish_reason := String(finish_value) if finish_value != null else ""
+	if finish_reason == "length":
+		_finalize(false, "模型输出达到长度上限（finish_reason=length）。请提高 max_tokens 或缩小任务范围。")
+	elif not finish_reason.is_empty():
 		_finalize(true)
 
 
@@ -460,32 +466,38 @@ func _handle_body_end() -> void:
 		_consume_stream_events()
 		var rest := _buffer.strip_edges()
 		if not rest.is_empty():
-			_handle_stream_event(rest)
+			if rest.begins_with("{"):
+				_extract_from_json(rest)
+			else:
+				_handle_stream_event(rest)
 			_buffer = ""
 		if _finalized:
 			return
-		# 个别服务端即使请求了 stream 也会整体返回 JSON，兜底解析
-		if last_response_text.is_empty() and not _buffer.is_empty():
-			_extract_from_json(_buffer)
-		_finalize(true)
+		_finalize(_completion_error.is_empty(), _completion_error)
 		return
 	_extract_from_json(_buffer)
-	_finalize(true)
+	_finalize(_completion_error.is_empty(), _completion_error)
 
 
 func _extract_from_json(raw: String) -> void:
 	var json := JSON.new()
 	if json.parse(raw) != OK:
 		push_warning("无法解析响应 JSON")
+		_completion_error = "模型响应不是有效 JSON。"
 		return
 	if not (json.data is Dictionary):
 		push_warning("AI 响应不是预期的 JSON 对象结构")
+		_completion_error = "模型响应不是预期的 JSON 对象。"
 		return
 	var obj: Dictionary = json.data
 	var choices: Array = obj.get("choices", [])
 	if choices.is_empty():
+		_completion_error = "模型响应缺少 choices。"
 		return
 	var choice: Dictionary = choices[0]
+	if choice.get("finish_reason", null) == "length":
+		_completion_error = "模型输出达到长度上限（finish_reason=length）。请提高 max_tokens 或缩小任务范围。"
+		return
 	var msg: Dictionary = choice.get("message", {})
 	var reasoning: Variant = msg.get("reasoning_content", null)
 	if reasoning != null:
@@ -518,6 +530,9 @@ func _fail_with_server_error() -> void:
 func _finalize(success: bool, error_message := "") -> void:
 	if _finalized:
 		return
+	if success and last_response_text.is_empty():
+		success = false
+		error_message = "模型没有返回正文，请检查服务端响应或稍后重试。"
 	_finalized = true
 	if _client != null:
 		_client.close()

@@ -10,6 +10,7 @@ const PLUGIN_ICON_PATH := "res://addons/ai_assistant/icon.svg"
 
 const WINDOW_SIZE_SETTING := "ai_assistant/workbench_window_size"
 const WINDOW_POSITION_SETTING := "ai_assistant/workbench_window_position"
+const WINDOW_SCALE_SETTING := "ai_assistant/workbench_window_scale"
 const DEFAULT_WINDOW_SIZE := Vector2i(1280, 720)
 const MIN_WINDOW_SIZE := Vector2i(1080, 640)
 const LEGACY_WINDOW_SIZE := Vector2i(1120, 720)
@@ -42,6 +43,7 @@ var _workbench: Control
 var _workbench_window: Window
 var _toolbar_button: Button
 var _vcs_panel: Control
+var _window_geometry_loaded := false
 
 
 func _enter_tree() -> void:
@@ -137,8 +139,10 @@ func _build_workbench_window() -> void:
 	_workbench_window = Window.new()
 	_workbench_window.name = "AIWorkbenchWindow"
 	_workbench_window.title = "AI 工作台"
-	_workbench_window.size = DEFAULT_WINDOW_SIZE
-	_workbench_window.min_size = MIN_WINDOW_SIZE
+	var editor_scale := _editor_scale()
+	_workbench_window.content_scale_factor = editor_scale
+	_workbench_window.size = _fit_on_screen(_scaled_size(DEFAULT_WINDOW_SIZE, editor_scale))
+	_workbench_window.min_size = _fit_on_screen(_scaled_size(MIN_WINDOW_SIZE, editor_scale))
 	_workbench_window.wrap_controls = true
 	_workbench_window.transient = true
 	_workbench_window.exclusive = false
@@ -167,21 +171,48 @@ func _restore_window_geometry() -> bool:
 	var window_size := size_value as Vector2i if size_value is Vector2i else DEFAULT_WINDOW_SIZE
 	if window_size == LEGACY_WINDOW_SIZE:
 		window_size = DEFAULT_WINDOW_SIZE
-	window_size.x = maxi(window_size.x, MIN_WINDOW_SIZE.x)
-	window_size.y = maxi(window_size.y, MIN_WINDOW_SIZE.y)
+	var previous_scale := float(settings.get_setting(WINDOW_SCALE_SETTING)) if settings.has_setting(WINDOW_SCALE_SETTING) else 1.0
+	var editor_scale := _editor_scale()
+	window_size = _scaled_size(window_size, editor_scale / maxf(previous_scale, 0.1))
+	var minimum := _workbench_window.min_size
+	window_size.x = maxi(window_size.x, minimum.x)
+	window_size.y = maxi(window_size.y, minimum.y)
+	window_size = _fit_on_screen(window_size)
 	_workbench_window.size = window_size
+	_window_geometry_loaded = true
 	if position_value is Vector2i and (position_value as Vector2i).x >= 0 and (position_value as Vector2i).y >= 0:
-		_workbench_window.position = position_value
+		var usable := DisplayServer.screen_get_usable_rect(DisplayServer.SCREEN_OF_MAIN_WINDOW)
+		var position := position_value as Vector2i
+		if usable.size.x > 0 and usable.size.y > 0:
+			position.x = clampi(position.x, usable.position.x, usable.end.x - window_size.x)
+			position.y = clampi(position.y, usable.position.y, usable.end.y - window_size.y)
+		_workbench_window.position = position
 		return false
 	return true
 
 
 func _persist_window_geometry() -> void:
-	if _workbench_window == null:
+	if _workbench_window == null or not _window_geometry_loaded:
 		return
 	var settings := _editor_settings()
 	settings.set_setting(WINDOW_SIZE_SETTING, _workbench_window.size)
 	settings.set_setting(WINDOW_POSITION_SETTING, _workbench_window.position)
+	settings.set_setting(WINDOW_SCALE_SETTING, _editor_scale())
+
+
+func _editor_scale() -> float:
+	return maxf(EditorInterface.get_editor_scale(), 1.0)
+
+
+func _scaled_size(value: Vector2i, factor: float) -> Vector2i:
+	return Vector2i(roundi(value.x * factor), roundi(value.y * factor))
+
+
+func _fit_on_screen(value: Vector2i) -> Vector2i:
+	var usable := DisplayServer.screen_get_usable_rect(DisplayServer.SCREEN_OF_MAIN_WINDOW)
+	if usable.size.x <= 0 or usable.size.y <= 0:
+		return value
+	return Vector2i(mini(value.x, maxi(1, usable.size.x - 40)), mini(value.y, maxi(1, usable.size.y - 40)))
 
 
 func _build_control(path: String, control_name: String) -> Control:
