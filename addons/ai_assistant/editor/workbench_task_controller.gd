@@ -38,6 +38,7 @@ var _client: AILLMClient
 var _pending_kind := ""
 var _chat_history: Array[Dictionary] = []
 var _chat_streamed := false
+var _reasoning_received := ""
 var _original_node_scripts: Array[Dictionary] = []
 var _original_script_sources: Array[Dictionary] = []
 var _locked_script: Script
@@ -287,6 +288,7 @@ func run_builder(request: String, selected_node: Node = null) -> bool:
 				_locked_script = current_script
 	_pending_kind = "builder"
 	_chat_streamed = false
+	_reasoning_received = ""
 	message_added.emit("user", task)
 	_set_state(PLANNING, "正在理解任务和锁定上下文")
 	_client.stream = false
@@ -317,6 +319,7 @@ func run_chat(message: String) -> bool:
 		return false
 	_pending_kind = "chat"
 	_chat_streamed = false
+	_reasoning_received = ""
 	_chat_history.append({"role": "user", "content": text})
 	message_added.emit("user", text)
 	_set_state(GENERATING, "模型正在回复")
@@ -335,8 +338,11 @@ func run_chat(message: String) -> bool:
 
 func cancel() -> void:
 	if _client != null and _client.is_busy():
-		_client.cancel()
+		# cancel() emits request_finished synchronously. Release the request first
+		# so its completion cannot appear as an error or append stale output.
 		_pending_kind = ""
+		_reasoning_received = ""
+		_client.cancel()
 		_set_state(CANCELLED, "已停止")
 
 
@@ -456,11 +462,21 @@ func clear_finished() -> void:
 
 func _on_request_finished(success: bool, error_message: String) -> void:
 	var kind := _pending_kind
+	if kind.is_empty():
+		return
 	_pending_kind = ""
 	if not success:
 		if state_key != CANCELLED:
 			_set_state(ERROR, error_message)
 		return
+	# Non-streamed responses (including Builder) have no reasoning_chunk signal.
+	# For streamed responses, emit only any final suffix not already delivered.
+	var reasoning := _client.last_reasoning_text
+	if reasoning.begins_with(_reasoning_received):
+		var remaining := reasoning.substr(_reasoning_received.length())
+		_reasoning_received = reasoning
+		if not remaining.is_empty():
+			reasoning_text.emit(remaining)
 	if kind == "chat":
 		var answer := _client.last_response_text
 		_chat_history.append({"role": "assistant", "content": answer})
@@ -953,12 +969,15 @@ func _live_script_text(script_editor: ScriptEditor, script: Script) -> String:
 
 
 func _on_stream_chunk(text: String) -> void:
-	if _pending_kind == "chat":
+	if _pending_kind == "chat" and not text.is_empty():
 		_chat_streamed = true
 		stream_text.emit(text)
 
 
 func _on_reasoning_chunk(text: String) -> void:
+	if _pending_kind.is_empty() or text.is_empty():
+		return
+	_reasoning_received += text
 	reasoning_text.emit(text)
 
 

@@ -27,7 +27,7 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 
 config/name="Godot AI Assistant"
 run/main_scene="res://examples/npc_chat_demo.tscn"
-config/features=PackedStringArray("4.6", "GL Compatibility")
+config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://project_icon.svg"
 
 [autoload]

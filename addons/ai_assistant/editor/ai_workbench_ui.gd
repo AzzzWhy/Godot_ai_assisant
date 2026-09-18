@@ -7,6 +7,8 @@ const CONTROLLER_SCRIPT := preload("res://addons/ai_assistant/editor/workbench_t
 const TIMELINE_SCRIPT := preload("res://addons/ai_assistant/editor/builder_task_timeline.gd")
 const PREVIEW_SCRIPT := preload("res://addons/ai_assistant/editor/proposal_review_view.gd")
 const THEME := preload("res://addons/ai_assistant/editor/workbench_dark_theme.gd")
+const CHAT_CARD := preload("res://addons/ai_assistant/editor/chat_message_card.gd")
+const CHAT_MARKDOWN := preload("res://addons/ai_assistant/editor/chat_markdown.gd")
 const TASK_AUTO_COLLAPSE_WIDTH := 900.0
 const TASK_RAIL_MIN := 250.0
 const TASK_RAIL_MAX := 300.0
@@ -21,7 +23,15 @@ var _preview: AIResultPreview
 var _body_split: HSplitContainer
 var _center_split: HSplitContainer
 var _left_card: PanelContainer
-var _chat_log: RichTextLabel
+var _chat_scroll: ScrollContainer
+var _chat_messages: VBoxContainer
+var _active_response: Variant = null
+var _clear_button: Button
+var _motion_toggle: CheckButton
+var _latest_button: Button
+var _follow_chat := true
+var _scroll_pending := false
+var _scroll_programmatic := false
 var _composer: TextEdit
 var _send: Button
 var _stop: Button
@@ -38,7 +48,6 @@ var _model_text: Label
 var _context_text: Label
 var _builder_mode := true
 var _active := false
-var _streaming_answer := false
 var _task_panel_visible := true
 var _task_panel_manually_set := false
 var _layout_initialized := false
@@ -230,10 +239,18 @@ func _build_chat_rail() -> Control:
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	heading_row.add_child(spacer)
 	var clear := Button.new()
+	_clear_button = clear
 	clear.text = "清空"
 	THEME.apply_button(clear, "ghost")
 	clear.pressed.connect(_clear_chat)
 	heading_row.add_child(clear)
+	_motion_toggle = CheckButton.new()
+	_motion_toggle.text = "动效"
+	_motion_toggle.button_pressed = true
+	_motion_toggle.add_theme_font_size_override("font_size", 11)
+	_motion_toggle.tooltip_text = "开启或关闭呼吸、文字渐显和折叠动画"
+	_motion_toggle.toggled.connect(_on_motion_toggled)
+	heading_row.add_child(_motion_toggle)
 	box.add_child(heading_row)
 
 	var context_card := PanelContainer.new()
@@ -245,13 +262,27 @@ func _build_chat_rail() -> Control:
 	context_card.add_child(_context_text)
 	box.add_child(context_card)
 
-	_chat_log = RichTextLabel.new()
-	_chat_log.bbcode_enabled = true
-	_chat_log.scroll_following = true
-	_chat_log.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_chat_log.add_theme_color_override("default_color", THEME.FG)
-	_chat_log.add_theme_font_size_override("normal_font_size", 13)
-	box.add_child(_chat_log)
+	_chat_scroll = ScrollContainer.new()
+	_chat_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_chat_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_chat_messages = VBoxContainer.new()
+	_chat_messages.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_chat_messages.add_theme_constant_override("separation", 12)
+	_chat_scroll.add_child(_chat_messages)
+	box.add_child(_chat_scroll)
+	var scrollbar := _chat_scroll.get_v_scroll_bar()
+	scrollbar.value_changed.connect(_on_chat_scrolled)
+	scrollbar.changed.connect(_schedule_chat_scroll)
+	_latest_button = Button.new()
+	_latest_button.text = "↓ 回到最新回复"
+	_latest_button.visible = false
+	THEME.apply_button(_latest_button, "ghost")
+	_latest_button.pressed.connect(func() -> void:
+		_follow_chat = true
+		_latest_button.hide()
+		_schedule_chat_scroll()
+	)
+	box.add_child(_latest_button)
 
 	var composer_card := PanelContainer.new()
 	composer_card.add_theme_stylebox_override("panel", THEME.panel(THEME.BG_CARD, 3))
@@ -429,6 +460,10 @@ func _refresh_review_bar() -> void:
 
 
 func _on_state_changed(state: String, message: String) -> void:
+	if state in ["planning", "generating"]:
+		_ensure_response()
+	elif state in ["idle", "review", "done", "error", "cancelled"]:
+		_finish_response(state)
 	_status_text.text = message
 	match state:
 		"planning", "generating", "applying":
@@ -445,46 +480,103 @@ func _on_state_changed(state: String, message: String) -> void:
 	var busy := controller.is_busy()
 	_send.disabled = busy
 	_stop.visible = busy
+	_clear_button.disabled = busy
+	_clear_button.tooltip_text = "请先停止当前回复再清空" if busy else "清空当前会话"
 	_refresh_review_bar()
 
 
 func _on_message_added(role: String, text: String) -> void:
-	_streaming_answer = false
-	_append_message(role, text)
+	if role == "user":
+		_finish_response("idle")
+		_follow_chat = true
+		_append_message(role, text)
+	elif role == "assistant":
+		_ensure_response().set_answer(text)
+	else:
+		_append_message(role, text)
 
 
 func _on_stream_text(text: String) -> void:
-	if not _streaming_answer:
-		_streaming_answer = true
-		_chat_log.append_text("\n[color=#%s][b]AI[/b][/color]\n" % THEME.SUCCESS.to_html(false))
-	_chat_log.append_text(_escape_bbcode(text))
+	if not text.is_empty():
+		_ensure_response().append_answer(text)
 
 
-func _on_reasoning_text(_text: String) -> void:
-	pass
+func _on_reasoning_text(text: String) -> void:
+	if not text.is_empty():
+		_ensure_response().append_reasoning(text)
 
 
 func _append_message(role: String, text: String) -> void:
-	if _chat_log == null or text.is_empty():
+	if _chat_messages == null or text.is_empty():
 		return
-	var label := "AI"
-	var color := THEME.SUCCESS
-	match role:
-		"user":
-			label = "你"
-			color = THEME.ACCENT
-		"system":
-			label = "系统"
-			color = THEME.FG_MUTED
-	_chat_log.append_text("\n[color=#%s][b]%s[/b][/color]\n%s\n" % [
-		color.to_html(false),
-		label,
-		_markdown_to_bbcode(text),
-	])
+	var card := _new_chat_card(role)
+	card.set_answer(text)
+
+
+func _new_chat_card(role: String) -> Variant:
+	var card := CHAT_CARD.new()
+	card.role = role
+	card.animations_enabled = _motion_toggle.button_pressed
+	_chat_messages.add_child(card)
+	card.content_changed.connect(_schedule_chat_scroll)
+	_schedule_chat_scroll()
+	return card
+
+
+func _ensure_response() -> Variant:
+	if not is_instance_valid(_active_response):
+		_active_response = _new_chat_card("assistant")
+		_active_response.begin()
+	return _active_response
+
+
+func _finish_response(state: String) -> void:
+	if is_instance_valid(_active_response):
+		_active_response.finish(state)
+	_active_response = null
+
+
+func _on_motion_toggled(enabled: bool) -> void:
+	for card in _chat_messages.get_children():
+		card.set_animations(enabled)
+
+
+func _on_chat_scrolled(value: float) -> void:
+	if _scroll_programmatic or _scroll_pending:
+		return
+	var bar := _chat_scroll.get_v_scroll_bar()
+	_follow_chat = value >= bar.max_value - bar.page - 28.0
+	_latest_button.visible = not _follow_chat
+
+
+func _schedule_chat_scroll() -> void:
+	if _scroll_pending or not _follow_chat or _chat_scroll == null:
+		return
+	_scroll_pending = true
+	_scroll_chat_after_layout.call_deferred()
+
+
+func _scroll_chat_after_layout() -> void:
+	# Containers settle after streamed text changes their minimum height.
+	await get_tree().process_frame
+	if not is_inside_tree():
+		return
+	if _follow_chat:
+		_scroll_programmatic = true
+		_chat_scroll.scroll_vertical = int(_chat_scroll.get_v_scroll_bar().max_value)
+		_scroll_programmatic = false
+	_scroll_pending = false
 
 
 func _clear_chat() -> void:
-	_chat_log.clear()
+	if controller.is_busy():
+		return
+	_finish_response("cancelled")
+	for card in _chat_messages.get_children():
+		_chat_messages.remove_child(card)
+		card.queue_free()
+	_follow_chat = true
+	_latest_button.hide()
 	controller.clear_chat_history()
 	_append_message("system", "对话已清空。当前 Builder 草稿不会被删除。")
 
@@ -735,29 +827,11 @@ func _on_models_loaded(models: Array, error_message: String) -> void:
 
 
 func _markdown_to_bbcode(text: String) -> String:
-	var escaped := _escape_bbcode(text)
-	var output := PackedStringArray()
-	for line in escaped.split("\n"):
-		var trimmed := line.strip_edges()
-		if trimmed.begins_with("### "):
-			output.append("[b]" + line.substr(line.find("### ") + 4) + "[/b]")
-		elif trimmed.begins_with("## "):
-			output.append("[b]" + line.substr(line.find("## ") + 3) + "[/b]")
-		elif trimmed.begins_with("- "):
-			output.append("  • " + line.substr(line.find("- ") + 2))
-		else:
-			output.append(line)
-	return "\n".join(output)
+	return CHAT_MARKDOWN.render(text)
 
 
 func _escape_bbcode(text: String) -> String:
-	return (
-		text
-		.replace("[", "\u0001")
-		.replace("]", "\u0002")
-		.replace("\u0001", "[lb]")
-		.replace("\u0002", "[rb]")
-	)
+	return CHAT_MARKDOWN.escape_bbcode(text)
 
 
 func _style_split(split: HSplitContainer) -> void:

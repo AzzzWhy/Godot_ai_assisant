@@ -43,6 +43,8 @@
 | 当前文件 | 旧名 | 作用 |
 | --- | --- | --- |
 | `addons/ai_assistant/editor/ai_workbench_ui.gd` | `workbench_main.gd` | 构建悬浮工作台、Chat/Builder 输入区、审查操作栏和模型设置窗口。 |
+| `addons/ai_assistant/editor/chat_message_card.gd` | — | 单条对话卡片：思考折叠区、Markdown 正文、生成状态和动画生命周期。 |
+| `addons/ai_assistant/editor/chat_markdown.gd` | — | 将聊天 Markdown 安全转换为 Godot BBCode，兼容流式未完成格式。 |
 | `addons/ai_assistant/editor/workbench_task_controller.gd` | `workbench_controller.gd` | 协调 Chat、Builder、上下文快照、草稿审查、文件/节点应用和失败回滚。 |
 | `addons/ai_assistant/editor/builder_task_timeline.gd` | `task_timeline.gd` | 显示已锁定的编辑器上下文及 Builder 各执行阶段。 |
 | `addons/ai_assistant/editor/proposal_review_view.gd` | `result_preview.gd` | 显示待审查文件、修改前后源码、统一 Diff 和节点操作。 |
@@ -60,6 +62,9 @@
 | `examples/npc_chat_demo.tscn` | `npc_demo.tscn` | 可运行的 NPC 聊天示例场景，也是项目默认启动场景。 |
 | `examples/npc_chat_demo.gd` | `npc_demo.gd` | 示例场景的交互界面和 `AI` 单例调用逻辑。 |
 | `tests/plugin_smoke_test.gd` | `smoke_test.gd` | 离线冒烟测试：客户端、草稿、事务回滚、场景恢复及工作台构建。 |
+| `tests/chat_markdown_test.gd` | — | 验证 Markdown 格式、安全转义、不完整代码块和窄栏换行。 |
+| `tests/reasoning_controller_test.gd` | — | 验证流式/非流式思考传递、去重和取消后的迟到事件。 |
+| `tests/chat_ui_test.gd` | — | 验证消息卡片布局、折叠、动效和停止状态；支持本地模拟预览。 |
 | `tests/chat_http_integration_test.gd` | `integration_test.gd` | 经本地 HTTP 模拟服务验证流式/非流式响应、模型列表和错误处理。 |
 | `tests/chat_api_mock_server.py` | `mock_server.py` | 为 HTTP 集成测试提供 OpenAI 兼容接口的本地模拟服务。 |
 

@@ -39,6 +39,10 @@ Builder 会按以下流程执行：
 
 Chat 用于只读问答，不写文件、不绑定节点。支持 OpenAI 兼容流式输出，Builder 有待审查草稿时会阻止切换执行，避免状态混淆。
 
+右侧对话使用独立消息卡片，支持 Markdown 标题、列表、引用、粗体、斜体、行内代码和代码块。模型返回的 `reasoning_content` 会显示在可折叠的「思考过程」区域；生成时展开，结束后自动收起，手动展开/收起会保留你的选择。未返回思考内容的模型只显示等待状态和正文，不生成虚假的思考文字。
+
+「动效」开关控制呼吸指示、流式文字渐进显示、卡片淡入和折叠动画。长思考内容独立滚动，不撑宽窗口；向上翻阅历史后不会强制跳回底部，可点击「回到最新回复」恢复跟随。停止或失败会保留已收到的内容并结束生成动画。
+
 ### 版本控制
 
 底部「版本控制」面板保持独立，提供状态、Diff、暂存、取消暂存、丢弃改动、提交和历史。AI 只根据已暂存 Diff 生成提交信息，不会自动提交。
@@ -103,6 +107,16 @@ Chat 用于只读问答，不写文件、不绑定节点。支持 OpenAI 兼容�
 ```bash
 godot --headless --path . -s res://tests/plugin_smoke_test.gd
 ```
+
+聊天 Markdown、思考传递及布局/动画生命周期专项测试（不请求真实模型）：
+
+```bash
+godot --headless --path . -s res://tests/chat_markdown_test.gd
+godot --headless --path . -s res://tests/reasoning_controller_test.gd
+godot --headless --path . -s res://tests/chat_ui_test.gd
+```
+
+运行 `godot --path . -s res://tests/chat_ui_test.gd -- --preview` 可查看明确标注为本地模拟数据的交互预览。
 
 本地 HTTP mock 集成测试：
 
