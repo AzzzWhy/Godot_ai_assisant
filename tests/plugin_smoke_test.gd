@@ -123,12 +123,14 @@ func _test_completion_failures() -> void:
 	client._busy = true
 	client._finalized = false
 	client._handle_stream_event('data: {"choices":[{"delta":{"content":"半截"},"finish_reason":"length"}]}')
+	client._handle_stream_event("data: [DONE]")
 	_check(
 		finished.size() == 1 and not finished[0][0] and String(finished[0][1]).contains("长度上限"),
 		"流式输出截断应明确报错，不能进入审查",
 	)
 	client._busy = true
 	client._finalized = false
+	client._completion_error = ""
 	client._stream_mode = true
 	client._status_code = 200
 	client._buffer = '{"choices":[{"message":{"content":"完整 JSON"},"finish_reason":"stop"}]}'
@@ -434,6 +436,10 @@ func _test_workbench_builds() -> void:
 	)
 	_check(screen._url_edit.get_theme_font_size("font_size") == 13, "设置输入框应使用工作台字号")
 	_check(screen._timeout.get_line_edit().get_theme_font_size("font_size") == 13, "设置数字框应使用工作台字号")
+	_check(
+		screen._max_tokens_unlimited != null and screen._timeout_unlimited != null,
+		"max_tokens 和响应时间应提供无上限选项",
+	)
 	_check(screen._remember.get_theme_font_size("font_size") == 13, "设置复选框应使用工作台字号")
 	_check(screen._preview._tabs.current_tab == 1, "结果区应默认展示统一 Diff")
 	var diff: String = screen._preview._unified_diff("a\nb\nc\nd", "a\nB\nc\nD", "res://sample.gd")

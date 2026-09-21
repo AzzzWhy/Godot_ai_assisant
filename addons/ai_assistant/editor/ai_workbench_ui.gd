@@ -56,13 +56,20 @@ var _settings_window: Window
 var _url_edit: LineEdit
 var _key_edit: LineEdit
 var _model_edit: LineEdit
-var _temperature: SpinBox
 var _max_tokens: SpinBox
+var _max_tokens_unlimited: CheckBox
 var _timeout: SpinBox
+var _timeout_unlimited: CheckBox
 var _stream: CheckBox
 var _remember: CheckBox
 var _system_prompt: TextEdit
 var _server_models: OptionButton
+var _models_refresh: Button
+var _models_status: Label
+var _settings_body_scroll: ScrollContainer
+var _settings_footer: HBoxContainer
+var _notice_dialog: AcceptDialog
+var _model_fetching := false
 
 
 func _ready() -> void:
@@ -119,6 +126,9 @@ func shutdown() -> void:
 	if _settings_window != null:
 		_settings_window.queue_free()
 		_settings_window = null
+	if _notice_dialog != null:
+		_notice_dialog.queue_free()
+		_notice_dialog = null
 
 
 func _build_ui() -> void:
@@ -350,6 +360,8 @@ func _connect_controller() -> void:
 	controller.draft_changed.connect(_refresh_review_bar)
 	controller.context_changed.connect(_on_context_changed)
 	controller.models_loaded.connect(_on_models_loaded)
+	controller.token_usage_threshold_reached.connect(_on_token_usage_threshold_reached)
+	controller.response_stalled.connect(_on_response_stalled)
 	var config := controller.get_config()
 	_model_text.text = String(config.get("model", "未配置模型"))
 	_refresh_review_bar()
@@ -633,8 +645,8 @@ func _build_settings_window() -> void:
 	_settings_window.title = "AI 工作台设置"
 	var editor_scale := maxf(EditorInterface.get_editor_scale(), 1.0) if Engine.is_editor_hint() else 1.0
 	_settings_window.content_scale_factor = editor_scale
-	var settings_size := Vector2i(roundi(540 * editor_scale), roundi(560 * editor_scale))
-	var settings_minimum := Vector2i(roundi(460 * editor_scale), roundi(420 * editor_scale))
+	var settings_size := Vector2i(roundi(560 * editor_scale), roundi(620 * editor_scale))
+	var settings_minimum := Vector2i(roundi(360 * editor_scale), roundi(360 * editor_scale))
 	if Engine.is_editor_hint():
 		var usable := DisplayServer.screen_get_usable_rect(DisplayServer.SCREEN_OF_MAIN_WINDOW)
 		if usable.size.x > 0 and usable.size.y > 0:
@@ -656,24 +668,26 @@ func _build_settings_window() -> void:
 	_settings_window.add_child(panel)
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	margin.add_theme_constant_override("margin_left", 18)
-	margin.add_theme_constant_override("margin_right", 18)
-	margin.add_theme_constant_override("margin_top", 18)
-	margin.add_theme_constant_override("margin_bottom", 18)
+	margin.add_theme_constant_override("margin_left", 14)
+	margin.add_theme_constant_override("margin_right", 14)
+	margin.add_theme_constant_override("margin_top", 14)
+	margin.add_theme_constant_override("margin_bottom", 14)
 	panel.add_child(margin)
 	var layout := VBoxContainer.new()
 	layout.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	layout.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	layout.add_theme_constant_override("separation", 10)
 	margin.add_child(layout)
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	layout.add_child(scroll)
+	_settings_body_scroll = ScrollContainer.new()
+	_settings_body_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_settings_body_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_settings_body_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_settings_body_scroll.follow_focus = true
+	layout.add_child(_settings_body_scroll)
 	var box := VBoxContainer.new()
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.add_theme_constant_override("separation", 10)
-	scroll.add_child(box)
+	box.add_theme_constant_override("separation", 8)
+	_settings_body_scroll.add_child(box)
 	var heading := Label.new()
 	heading.text = "模型连接"
 	THEME.apply_label(heading, false, 18)
@@ -682,39 +696,57 @@ func _build_settings_window() -> void:
 	note.text = "API Key 默认只保存在当前 Godot 会话。"
 	THEME.apply_label(note, true, 12)
 	box.add_child(note)
-	var grid := GridContainer.new()
-	grid.columns = 2
-	grid.add_theme_constant_override("h_separation", 10)
-	grid.add_theme_constant_override("v_separation", 8)
-	box.add_child(grid)
-	_url_edit = _settings_line(grid, "Base URL", "https://api.deepseek.com")
-	_key_edit = _settings_line(grid, "API Key", "sk-...")
+	var fields := VBoxContainer.new()
+	fields.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	fields.add_theme_constant_override("separation", 6)
+	box.add_child(fields)
+	_url_edit = _settings_line(fields, "Base URL", "https://api.deepseek.com")
+	_key_edit = _settings_line(fields, "API Key", "sk-...")
 	_key_edit.secret = true
-	_model_edit = _settings_line(grid, "模型", "deepseek-chat")
-	_temperature = _settings_spin(grid, "温度", -1, 2, 0.1)
-	_max_tokens = _settings_spin(grid, "max_tokens", 0, 131072, 1)
-	_timeout = _settings_spin(grid, "超时（秒）", 5, 600, 1)
-	var model_row := HBoxContainer.new()
+	_model_edit = _settings_line(fields, "模型", "deepseek-chat")
+	_max_tokens = _settings_spin(fields, "max_tokens", 1, 131072, 1)
+	_max_tokens_unlimited = _settings_unlimited_toggle(
+		fields,
+		"无上限（不向模型服务发送 max_tokens）",
+		_max_tokens,
+	)
+	_timeout = _settings_spin(fields, "最大响应时间（秒）", 5, 600, 1)
+	_timeout_unlimited = _settings_unlimited_toggle(
+		fields,
+		"无上限（300 秒无响应时仅提醒，不中断）",
+		_timeout,
+	)
+	_url_edit.text_changed.connect(func(_text: String) -> void: _update_model_query_state())
+	_key_edit.text_changed.connect(func(_text: String) -> void: _update_model_query_state())
 	var server_label := Label.new()
 	server_label.text = "服务器模型"
 	THEME.apply_label(server_label, true, 12)
-	model_row.add_child(server_label)
+	box.add_child(server_label)
+	var model_row := HBoxContainer.new()
+	model_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_server_models = OptionButton.new()
 	_server_models.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_server_models.fit_to_longest_item = false
+	_server_models.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_server_models.add_theme_font_size_override("font_size", 13)
 	_server_models.item_selected.connect(func(index: int) -> void:
 		if index >= 0:
 			_model_edit.text = _server_models.get_item_text(index)
 	)
 	model_row.add_child(_server_models)
-	var refresh := Button.new()
-	refresh.text = "刷新"
-	THEME.apply_button(refresh, "ghost")
-	refresh.pressed.connect(func() -> void:
-		controller.fetch_models(_key_edit.text.strip_edges())
-	)
-	model_row.add_child(refresh)
+	_models_refresh = Button.new()
+	_models_refresh.text = "刷新"
+	THEME.apply_button(_models_refresh, "ghost")
+	_models_refresh.pressed.connect(_request_models)
+	model_row.add_child(_models_refresh)
 	box.add_child(model_row)
+	_models_status = Label.new()
+	_models_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_models_status.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_models_status.max_lines_visible = 2
+	_models_status.custom_minimum_size.x = 0
+	THEME.apply_label(_models_status, true, 11)
+	box.add_child(_models_status)
 	_stream = CheckBox.new()
 	_stream.text = "Chat 使用流式输出"
 	_stream.add_theme_font_size_override("font_size", 13)
@@ -731,38 +763,40 @@ func _build_settings_window() -> void:
 	_system_prompt.custom_minimum_size = Vector2(0, 120)
 	THEME.apply_line_edit(_system_prompt)
 	box.add_child(_system_prompt)
-	var buttons := HBoxContainer.new()
+	_settings_footer = HBoxContainer.new()
+	_settings_footer.custom_minimum_size.y = 34
 	var cancel := Button.new()
 	cancel.text = "取消"
 	THEME.apply_button(cancel, "ghost")
 	cancel.pressed.connect(_settings_window.hide)
-	buttons.add_child(cancel)
+	_settings_footer.add_child(cancel)
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	buttons.add_child(spacer)
+	_settings_footer.add_child(spacer)
 	var save := Button.new()
 	save.text = "保存设置"
 	THEME.apply_button(save, "primary")
 	save.pressed.connect(_save_settings)
-	buttons.add_child(save)
-	layout.add_child(buttons)
+	_settings_footer.add_child(save)
+	layout.add_child(_settings_footer)
 
 
-func _settings_line(grid: GridContainer, label_text: String, placeholder: String) -> LineEdit:
+func _settings_line(container: VBoxContainer, label_text: String, placeholder: String) -> LineEdit:
 	var label := Label.new()
 	label.text = label_text
 	THEME.apply_label(label, true, 12)
-	grid.add_child(label)
+	container.add_child(label)
 	var edit := LineEdit.new()
 	edit.placeholder_text = placeholder
 	edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	edit.custom_minimum_size.x = 0
 	THEME.apply_line_edit(edit)
-	grid.add_child(edit)
+	container.add_child(edit)
 	return edit
 
 
 func _settings_spin(
-	grid: GridContainer,
+	container: VBoxContainer,
 	label_text: String,
 	minimum: float,
 	maximum: float,
@@ -771,14 +805,29 @@ func _settings_spin(
 	var label := Label.new()
 	label.text = label_text
 	THEME.apply_label(label, true, 12)
-	grid.add_child(label)
+	container.add_child(label)
 	var spin := SpinBox.new()
+	spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	spin.custom_minimum_size.x = 0
 	spin.min_value = minimum
 	spin.max_value = maximum
 	spin.step = step
 	spin.get_line_edit().add_theme_font_size_override("font_size", 13)
-	grid.add_child(spin)
+	container.add_child(spin)
 	return spin
+
+
+func _settings_unlimited_toggle(
+	container: VBoxContainer,
+	text: String,
+	spin: SpinBox,
+) -> CheckBox:
+	var toggle := CheckBox.new()
+	toggle.text = text
+	toggle.add_theme_font_size_override("font_size", 12)
+	toggle.toggled.connect(func(enabled: bool) -> void: spin.editable = not enabled)
+	container.add_child(toggle)
+	return toggle
 
 
 func _fill_settings() -> void:
@@ -786,9 +835,14 @@ func _fill_settings() -> void:
 	_url_edit.text = String(config.get("base_url", ""))
 	_key_edit.text = String(config.get("api_key", ""))
 	_model_edit.text = String(config.get("model", ""))
-	_temperature.value = float(config.get("temperature", 1.0))
-	_max_tokens.value = int(config.get("max_tokens", 0))
-	_timeout.value = float(config.get("timeout", 60.0))
+	var configured_max_tokens := int(config.get("max_tokens", 0))
+	_max_tokens.value = configured_max_tokens if configured_max_tokens > 0 else 4096
+	_max_tokens_unlimited.button_pressed = configured_max_tokens <= 0
+	_max_tokens.editable = not _max_tokens_unlimited.button_pressed
+	var configured_timeout := float(config.get("timeout", 60.0))
+	_timeout.value = configured_timeout if configured_timeout > 0.0 else 60.0
+	_timeout_unlimited.button_pressed = configured_timeout <= 0.0
+	_timeout.editable = not _timeout_unlimited.button_pressed
 	_stream.button_pressed = bool(config.get("stream", true))
 	_system_prompt.text = String(config.get("system_prompt", ""))
 	var settings := EditorInterface.get_editor_settings()
@@ -797,6 +851,47 @@ func _fill_settings() -> void:
 		if settings.has_setting("ai_assistant/remember_api_key")
 		else false
 	)
+	_update_model_query_state()
+
+
+func _connection_form_issue() -> String:
+	var url := _url_edit.text.strip_edges()
+	var key := _key_edit.text.strip_edges()
+	if url.is_empty():
+		return "请先填写 Base URL。"
+	if not (url.begins_with("https://") or url.begins_with("http://")):
+		return "Base URL 需以 http:// 或 https:// 开头。"
+	var without_scheme := url.substr(url.find("://") + 3)
+	if without_scheme.get_slice("/", 0).strip_edges().is_empty():
+		return "Base URL 缺少服务器地址。"
+	if key.is_empty():
+		return "请先填写 API Key。"
+	if key.length() < 8 or key.contains(" "):
+		return "API Key 看起来不完整。"
+	return ""
+
+
+func _update_model_query_state(update_message := true) -> void:
+	if _models_refresh == null or _models_status == null:
+		return
+	var issue := _connection_form_issue()
+	_models_refresh.disabled = _model_fetching or not issue.is_empty()
+	if update_message and not _model_fetching:
+		_models_status.text = issue if not issue.is_empty() else "连接信息完整，可以查询模型。"
+
+
+func _request_models() -> void:
+	var issue := _connection_form_issue()
+	if not issue.is_empty():
+		_models_status.text = issue
+		_update_model_query_state(false)
+		return
+	_model_fetching = true
+	_models_refresh.disabled = true
+	_server_models.clear()
+	_server_models.add_item("正在查询…")
+	_models_status.text = "正在查询服务器模型…"
+	controller.fetch_models(_key_edit.text.strip_edges(), _url_edit.text.strip_edges())
 
 
 func _save_settings() -> void:
@@ -804,9 +899,8 @@ func _save_settings() -> void:
 		"base_url": _url_edit.text,
 		"api_key": _key_edit.text,
 		"model": _model_edit.text,
-		"temperature": _temperature.value,
-		"max_tokens": int(_max_tokens.value),
-		"timeout": _timeout.value,
+		"max_tokens": 0 if _max_tokens_unlimited.button_pressed else int(_max_tokens.value),
+		"timeout": 0.0 if _timeout_unlimited.button_pressed else _timeout.value,
 		"stream": _stream.button_pressed,
 		"system_prompt": _system_prompt.text,
 	}, _remember.button_pressed)
@@ -816,14 +910,82 @@ func _save_settings() -> void:
 
 
 func _on_models_loaded(models: Array, error_message: String) -> void:
+	_model_fetching = false
 	_server_models.clear()
 	if not error_message.is_empty():
-		_server_models.add_item("加载失败：" + error_message)
+		var compact := _compact_model_error(error_message)
+		_server_models.add_item("获取失败")
+		_models_status.text = compact
+		_models_status.tooltip_text = error_message
+		_update_model_query_state(false)
 		return
 	for model in models:
 		_server_models.add_item(String(model))
 	if not models.is_empty():
 		_model_edit.text = String(models[0])
+		_models_status.text = "已获取 %d 个模型。" % models.size()
+	else:
+		_server_models.add_item("未返回模型")
+		_models_status.text = "服务器没有返回模型，可手动填写模型名。"
+	_models_status.tooltip_text = ""
+	_update_model_query_state(false)
+
+
+func _on_token_usage_threshold_reached(total_tokens: int, threshold: int) -> void:
+	_show_notice(
+		"Token 使用提醒",
+		"累计 Token 消耗已超过 %s。\n当前累计：%s。\n\n此提醒每增加一千万 Token 显示一次。" % [
+			_format_integer(threshold),
+			_format_integer(total_tokens),
+		],
+	)
+
+
+func _on_response_stalled(elapsed_seconds: int) -> void:
+	_show_notice(
+		"响应时间过长",
+		"工作区已连续 %d 秒没有收到模型响应。\n\n请求仍在继续；你可以继续等待，或点击工作台中的“停止”。" % elapsed_seconds,
+	)
+
+
+func _show_notice(title: String, message: String) -> void:
+	if _notice_dialog == null or not is_instance_valid(_notice_dialog):
+		_notice_dialog = AcceptDialog.new()
+		_notice_dialog.ok_button_text = "知道了"
+		_notice_dialog.min_size = Vector2i(420, 180)
+		var host := _settings_host()
+		if host != null:
+			host.add_child(_notice_dialog)
+	_notice_dialog.title = title
+	_notice_dialog.dialog_text = message
+	_notice_dialog.popup_centered(Vector2i(460, 210))
+
+
+func _format_integer(value: int) -> String:
+	var raw := str(absi(value))
+	var grouped := ""
+	while raw.length() > 3:
+		grouped = "," + raw.right(3) + grouped
+		raw = raw.left(raw.length() - 3)
+	return ("-" if value < 0 else "") + raw + grouped
+
+
+func _compact_model_error(error_message: String) -> String:
+	var one_line := error_message.replace("\r", " ").replace("\n", " ").strip_edges()
+	var lower := one_line.to_lower()
+	if lower.contains("http 401") or lower.contains("401"):
+		return "API Key 无效或未发送（HTTP 401）。"
+	if lower.contains("http 403") or lower.contains("403"):
+		return "当前 API Key 没有访问权限（HTTP 403）。"
+	if lower.contains("http 404") or lower.contains("404"):
+		return "模型列表地址不存在（HTTP 404）。"
+	if lower.contains("http 429") or lower.contains("429"):
+		return "请求过于频繁或额度不足（HTTP 429）。"
+	if lower.contains("result=") or lower.contains("连接") or lower.contains("network"):
+		return "无法连接服务器，请检查网络和 Base URL。"
+	if one_line.length() > 72:
+		return one_line.left(69) + "…"
+	return one_line
 
 
 func _markdown_to_bbcode(text: String) -> String:

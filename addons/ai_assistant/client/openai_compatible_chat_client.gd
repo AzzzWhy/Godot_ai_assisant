@@ -8,7 +8,7 @@ extends Node
 ## - 基于 HTTPClient 的低层轮询，支持 SSE 流式输出（无需线程）
 ## - 自动维护对话历史（system + user + assistant）
 ## - 单客户端同一时间只处理一个请求，多余请求自动排队
-## - 可配置超时、温度、max_tokens；支持 cancel()
+## - 可配置超时和 max_tokens；0 表示不施加限制；支持 cancel()
 ## - 对 deepseek-reasoner 的 reasoning_content（思考过程）单独发信号
 
 signal stream_chunk(text: String)
@@ -23,19 +23,24 @@ signal history_changed(history: Array)
 ## 对话历史变更（用于持久化 / UI 同步）
 signal models_loaded(models: Array, error_message: String)
 ## 调用 fetch_models() 后的结果：models = 模型 id 列表；error_message 为空表示成功
+signal token_usage_reported(total_tokens: int)
+## 服务端返回本次请求的 usage.total_tokens 后发出
+signal response_stalled(elapsed_seconds: int)
+## 连续 300 秒没有收到服务端响应数据时发出；不会自动取消无上限请求
 
 const DEFAULT_BASE_URL := "https://api.deepseek.com"
 const DEFAULT_MODEL := "deepseek-chat"
 const CHAT_PATH := "/chat/completions"
+const STALLED_WARNING_SECONDS := 300
 
 ## ---------- 配置（可用属性直接修改，或由 Autoload 从 ProjectSettings 读取） ----------
 var base_url := DEFAULT_BASE_URL
 var api_key := ""
 var model := DEFAULT_MODEL
-var temperature := 1.0      # 设为 -1 表示不发送该参数
+var temperature := -1.0     # 兼容旧调用；工作台不再暴露此项，默认不发送
 var max_tokens := 0         # 0 = 使用服务端默认值
 var stream := true
-var timeout_seconds := 60.0
+var timeout_seconds := 60.0 # 0 = 无上限；300 秒无响应时仅提醒
 var system_prompt := ""
 
 ## 对话历史（OpenAI messages 格式）：[{"role": "user", "content": "..."}, ...]
@@ -62,6 +67,9 @@ var _last_url := ""  # 最近一次实际请求的完整 URL（用于错误诊�
 var _completion_error := ""
 var _models_http: HTTPRequest = null
 var _fetching_models := false
+var _last_activity_at_msec := 0
+var _stalled_warning_emitted := false
+var _request_usage_total := 0
 
 
 func is_busy() -> bool:
@@ -122,19 +130,19 @@ func cancel() -> void:
 # ------------------------- 模型列表（OpenAI 兼容 GET {base}/models） -------------------------
 
 ## 异步拉取当前 Key 可用的模型列表，完成后发出 models_loaded(models, error_message)
-## api_key_override：可选，指定本次请求使用的 Key（设置窗口里输入框未保存时用）
-func fetch_models(api_key_override := "") -> void:
+## 两个 override 仅用于本次查询，设置窗口无需先保存即可测试连接。
+func fetch_models(api_key_override := "", base_url_override := "") -> void:
 	if _fetching_models:
 		return
-	var url := build_models_url()
+	var url := build_models_url(base_url_override)
 	if url.is_empty():
 		models_loaded.emit([], "Base URL 无效，无法获取模型列表")
 		return
 	if _models_http == null:
 		_models_http = HTTPRequest.new()
 		add_child(_models_http)
-		_models_http.timeout = timeout_seconds
 		_models_http.request_completed.connect(_on_models_completed)
+	_models_http.timeout = timeout_seconds
 	_fetching_models = true
 	var headers := PackedStringArray(["Accept: application/json"])
 	var key := (api_key_override if not api_key_override.is_empty() else api_key).strip_edges()
@@ -195,6 +203,9 @@ func _pump() -> void:
 	_finalized = false
 	_last_status = HTTPClient.STATUS_DISCONNECTED
 	_started_at_msec = Time.get_ticks_msec()
+	_last_activity_at_msec = _started_at_msec
+	_stalled_warning_emitted = false
+	_request_usage_total = 0
 	last_response_text = ""
 	last_reasoning_text = ""
 	_completion_error = ""
@@ -211,7 +222,9 @@ func _pump() -> void:
 func _process(_delta: float) -> void:
 	if not _busy or _client == null:
 		return
-	if Time.get_ticks_msec() - _started_at_msec > timeout_seconds * 1000.0:
+	var now := Time.get_ticks_msec()
+	_notify_if_stalled(now)
+	if timeout_seconds > 0.0 and now - _started_at_msec > timeout_seconds * 1000.0:
 		_finalize(false, "请求超时（%d 秒）" % int(timeout_seconds))
 		return
 
@@ -240,6 +253,7 @@ func _process(_delta: float) -> void:
 				_status_code = _client.get_response_code()
 			var chunk: PackedByteArray = _client.read_response_body_chunk()
 			if chunk.size() > 0:
+				_last_activity_at_msec = now
 				_buffer += _decode_chunk(chunk)
 				if _stream_mode:
 					_consume_stream_events()
@@ -273,8 +287,8 @@ func _connect() -> int:
 
 ## 解析 base_url → {proto, host, port, base_path, query}
 ## 容错：base_url 可带 /v1 等前缀；即使误填了完整端点 /chat/completions 也会自动去重
-func _parse_base_url() -> Dictionary:
-	var endpoint := base_url.strip_edges().rstrip("/")
+func _parse_base_url(base_url_override := "") -> Dictionary:
+	var endpoint := (base_url_override if not base_url_override.strip_edges().is_empty() else base_url).strip_edges().rstrip("/")
 	if endpoint.is_empty():
 		return {}
 	var proto := "https"
@@ -313,8 +327,8 @@ func _parse_base_url() -> Dictionary:
 
 
 ## 拼接模型列表接口地址（OpenAI 兼容的 GET {base}/models）
-func build_models_url() -> String:
-	var parsed := _parse_base_url()
+func build_models_url(base_url_override := "") -> String:
+	var parsed := _parse_base_url(base_url_override)
 	if parsed.is_empty():
 		return ""
 	return "%s://%s:%d%s/models%s" % [parsed.proto, parsed.host, parsed.port, parsed.base_path, parsed.query]
@@ -347,7 +361,30 @@ func _build_payload() -> Dictionary:
 		payload["temperature"] = temperature
 	if max_tokens > 0:
 		payload["max_tokens"] = max_tokens
+	if _stream_mode:
+		# OpenAI 兼容服务会在流结束前返回 usage；不支持的服务通常会忽略此项。
+		payload["stream_options"] = {"include_usage": true}
 	return payload
+
+
+func _notify_if_stalled(now_msec: int) -> void:
+	if _stalled_warning_emitted or _last_activity_at_msec <= 0:
+		return
+	if now_msec - _last_activity_at_msec < STALLED_WARNING_SECONDS * 1000:
+		return
+	_stalled_warning_emitted = true
+	response_stalled.emit(STALLED_WARNING_SECONDS)
+
+
+func _capture_usage(obj: Dictionary) -> void:
+	var usage_value: Variant = obj.get("usage", null)
+	if not (usage_value is Dictionary):
+		return
+	var usage: Dictionary = usage_value
+	var total := int(usage.get("total_tokens", 0))
+	if total <= 0:
+		total = int(usage.get("prompt_tokens", 0)) + int(usage.get("completion_tokens", 0))
+	_request_usage_total = maxi(_request_usage_total, total)
 
 
 ## ---------- 流式（SSE）解析 ----------
@@ -417,7 +454,7 @@ func _handle_stream_event(event: String) -> void:
 	if data.is_empty():
 		return
 	if data == "[DONE]":
-		_finalize(true)
+		_finalize(_completion_error.is_empty(), _completion_error)
 		return
 	var json := JSON.new()
 	if json.parse(data) != OK:
@@ -427,6 +464,7 @@ func _handle_stream_event(event: String) -> void:
 		push_warning("AI 流式数据不是 JSON 对象: %s" % data)
 		return
 	var obj: Dictionary = json.data
+	_capture_usage(obj)
 	var choices: Array = obj.get("choices", [])
 	if choices.is_empty():
 		return
@@ -443,9 +481,7 @@ func _handle_stream_event(event: String) -> void:
 	var finish_value: Variant = choice.get("finish_reason", null)
 	var finish_reason := String(finish_value) if finish_value != null else ""
 	if finish_reason == "length":
-		_finalize(false, "模型输出达到长度上限（finish_reason=length）。请提高 max_tokens 或缩小任务范围。")
-	elif not finish_reason.is_empty():
-		_finalize(true)
+		_completion_error = "模型输出达到长度上限（finish_reason=length）。请提高 max_tokens 或缩小任务范围。"
 
 
 ## ---------- 收尾 ----------
@@ -490,6 +526,7 @@ func _extract_from_json(raw: String) -> void:
 		_completion_error = "模型响应不是预期的 JSON 对象。"
 		return
 	var obj: Dictionary = json.data
+	_capture_usage(obj)
 	var choices: Array = obj.get("choices", [])
 	if choices.is_empty():
 		_completion_error = "模型响应缺少 choices。"
@@ -560,6 +597,8 @@ func _finalize(success: bool, error_message := "") -> void:
 			history.remove_at(idx)
 
 	_last_user_message = {}
+	if _request_usage_total > 0:
+		token_usage_reported.emit(_request_usage_total)
 	request_finished.emit(success, error_message)
 	history_changed.emit(history)
 	_pump()

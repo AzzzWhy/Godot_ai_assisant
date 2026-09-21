@@ -71,6 +71,8 @@ func _send_delta(controller: ControllerHarness, delta: Dictionary, finish: Strin
 	controller._client._handle_stream_event("data: " + JSON.stringify({
 		"choices": [{"delta": delta, "finish_reason": finish if not finish.is_empty() else null}],
 	}))
+	if not finish.is_empty():
+		controller._client._handle_stream_event("data: [DONE]")
 
 
 func _test_non_streamed_chat() -> void:

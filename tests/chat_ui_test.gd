@@ -2,6 +2,7 @@ extends SceneTree
 ## Offline UI lifecycle tests. --preview keeps a clearly labelled demo open.
 
 const WORKBENCH := preload("res://addons/ai_assistant/editor/ai_workbench_ui.gd")
+const CLIENT := preload("res://addons/ai_assistant/client/openai_compatible_chat_client.gd")
 var _failures := 0
 
 
@@ -12,6 +13,83 @@ func _initialize() -> void:
 	root.add_child(screen)
 	screen._set_mode(false)
 	await process_frame
+	# Settings remain usable at the minimum supported size.
+	screen._settings_window.size = Vector2i(360, 360)
+	screen._settings_window.show()
+	await process_frame
+	await process_frame
+	_check(
+		screen._settings_footer.position.y + screen._settings_footer.size.y <= screen._settings_window.size.y,
+		"Settings footer remains visible in a small window",
+	)
+	_check(
+		screen._url_edit.size.x <= screen._settings_body_scroll.size.x + 1,
+		"Settings fields do not overflow a narrow window",
+	)
+	var temperature_visible := false
+	for label in screen._settings_body_scroll.find_children("*", "Label", true, false):
+		if label.text == "温度":
+			temperature_visible = true
+	_check(not temperature_visible, "Temperature is removed from workbench settings")
+	_check(
+		screen._max_tokens_unlimited != null and screen._timeout_unlimited != null,
+		"Token and response-time settings expose unlimited choices",
+	)
+	screen._timeout_unlimited.button_pressed = true
+	_check(not screen._timeout.editable, "Unlimited response time disables the numeric limit")
+	screen._timeout_unlimited.button_pressed = false
+	_check(screen._timeout.editable, "Finite response time enables the numeric limit")
+	var limit_client: AILLMClient = CLIENT.new()
+	limit_client.temperature = -1.0
+	limit_client.max_tokens = 0
+	limit_client._stream_mode = true
+	var unlimited_payload := limit_client._build_payload()
+	_check(
+		not unlimited_payload.has("temperature") and not unlimited_payload.has("max_tokens"),
+		"Unlimited payload omits temperature and max_tokens constraints",
+	)
+	_check(
+		bool(unlimited_payload.get("stream_options", {}).get("include_usage", false)),
+		"Streaming requests ask compatible providers to return token usage",
+	)
+	limit_client._capture_usage({"usage": {"prompt_tokens": 40, "completion_tokens": 2}})
+	_check(limit_client._request_usage_total == 42, "Provider token usage is captured")
+	var stalled_seconds: Array[int] = []
+	limit_client.response_stalled.connect(
+		func(seconds: int) -> void: stalled_seconds.append(seconds)
+	)
+	limit_client._last_activity_at_msec = 1
+	limit_client._notify_if_stalled(300001)
+	limit_client._notify_if_stalled(600001)
+	_check(stalled_seconds == [300], "A stalled request warns once after 300 seconds")
+	limit_client.free()
+	screen._url_edit.text = ""
+	screen._key_edit.text = ""
+	screen._update_model_query_state()
+	_check(screen._models_refresh.disabled, "Model query requires URL and API key")
+	screen._url_edit.text = "ws.example.com/v1"
+	screen._key_edit.text = "short"
+	screen._update_model_query_state()
+	_check(
+		screen._models_refresh.disabled and screen._models_status.text.contains("http"),
+		"Incomplete connection data has a concise local validation message",
+	)
+	screen._url_edit.text = "https://example.com/v1"
+	screen._key_edit.text = "sk-test-key"
+	screen._update_model_query_state()
+	_check(not screen._models_refresh.disabled, "Complete connection data enables model query")
+	_check(
+		screen._compact_model_error("模型列表 HTTP 401: You didn't provide an API key. Very long provider details")
+		== "API Key 无效或未发送（HTTP 401）。",
+		"Provider errors are compacted for the layout",
+	)
+	if "--preview-settings" in OS.get_cmdline_user_args():
+		root.title = "设置窗口响应式预览（本地测试）"
+		screen._settings_window.title = "AI 工作台设置 · 窄窗口测试"
+		screen._settings_window.size = Vector2i(380, 430)
+		screen._settings_window.show()
+		return
+	screen._settings_window.hide()
 	screen._on_message_added("user", "如何给角色添加左右移动？")
 	screen._on_state_changed("generating", "模型正在回复")
 	var first: Variant = screen._active_response

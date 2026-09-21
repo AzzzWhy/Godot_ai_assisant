@@ -10,6 +10,8 @@ signal reasoning_text(text: String)
 signal draft_changed
 signal context_changed(context: Dictionary)
 signal models_loaded(models: Array, error_message: String)
+signal token_usage_threshold_reached(total_tokens: int, threshold: int)
+signal response_stalled(elapsed_seconds: int)
 
 const CLIENT_SCRIPT := preload("res://addons/ai_assistant/client/openai_compatible_chat_client.gd")
 const BUILDER := preload("res://addons/ai_assistant/agent/builder_response_contract.gd")
@@ -26,6 +28,7 @@ const APPLYING := "applying"
 const DONE := "done"
 const ERROR := "error"
 const CANCELLED := "cancelled"
+const TOKEN_WARNING_STEP := 10_000_000
 
 var state_key := IDLE
 var state_message := "等待任务"
@@ -51,6 +54,7 @@ var _locked_scene_hash := ""
 var _scene_save_attempted := false
 var _latest_scene_snapshot: Dictionary = {}
 var _rollback_incomplete := false
+var _total_tokens_consumed := 0
 
 
 func _ready() -> void:
@@ -60,6 +64,8 @@ func _ready() -> void:
 	_client.reasoning_chunk.connect(_on_reasoning_chunk)
 	_client.request_finished.connect(_on_request_finished)
 	_client.models_loaded.connect(_on_models_loaded)
+	_client.token_usage_reported.connect(_on_token_usage_reported)
+	_client.response_stalled.connect(_on_response_stalled)
 	store = STORE_SCRIPT.new()
 	store.changed.connect(func() -> void: draft_changed.emit())
 	store.error.connect(func(message: String) -> void:
@@ -89,9 +95,10 @@ func load_config() -> void:
 	var settings := EditorInterface.get_editor_settings()
 	_client.base_url = String(_setting(settings, "ai_assistant/base_url", ""))
 	_client.model = String(_setting(settings, "ai_assistant/model", ""))
-	_client.temperature = float(_setting(settings, "ai_assistant/temperature", 1.0))
+	_client.temperature = -1.0
 	_client.max_tokens = int(_setting(settings, "ai_assistant/max_tokens", 0))
 	_client.timeout_seconds = float(_setting(settings, "ai_assistant/timeout", 60.0))
+	_total_tokens_consumed = int(_setting(settings, "ai_assistant/total_tokens_consumed", 0))
 	_client.stream = bool(_setting(settings, "ai_assistant/stream", true))
 	_client.system_prompt = String(_setting(
 		settings,
@@ -108,7 +115,6 @@ func get_config() -> Dictionary:
 		"base_url": _client.base_url,
 		"api_key": _client.api_key,
 		"model": _client.model,
-		"temperature": _client.temperature,
 		"max_tokens": _client.max_tokens,
 		"timeout": _client.timeout_seconds,
 		"stream": _client.stream,
@@ -122,13 +128,13 @@ func save_config(values: Dictionary, remember_key: bool) -> void:
 	_client.base_url = String(values.get("base_url", "")).strip_edges()
 	_client.api_key = String(values.get("api_key", "")).strip_edges()
 	_client.model = String(values.get("model", "")).strip_edges()
-	_client.temperature = float(values.get("temperature", 1.0))
+	_client.temperature = -1.0
 	_client.max_tokens = int(values.get("max_tokens", 0))
 	_client.timeout_seconds = float(values.get("timeout", 60.0))
 	_client.stream = bool(values.get("stream", true))
 	_client.system_prompt = String(values.get("system_prompt", ""))
 	var settings := EditorInterface.get_editor_settings()
-	for key in ["base_url", "model", "temperature", "max_tokens", "timeout", "stream", "system_prompt"]:
+	for key in ["base_url", "model", "max_tokens", "timeout", "stream", "system_prompt"]:
 		settings.set_setting("ai_assistant/" + key, values.get(key, get_config().get(key)))
 	settings.set_setting("ai_assistant/remember_api_key", remember_key)
 	if remember_key and not _client.api_key.is_empty():
@@ -141,9 +147,13 @@ func save_config(values: Dictionary, remember_key: bool) -> void:
 	SESSION_CONFIG.capture(_client)
 
 
-func fetch_models(api_key_override := "") -> void:
+func fetch_models(api_key_override := "", base_url_override := "") -> void:
 	var key := api_key_override.strip_edges()
-	_client.fetch_models(key if not key.is_empty() else _client.api_key)
+	var url := base_url_override.strip_edges()
+	_client.fetch_models(
+		key if not key.is_empty() else _client.api_key,
+		url if not url.is_empty() else _client.base_url,
+	)
 
 
 func is_configured() -> bool:
@@ -294,8 +304,11 @@ func run_builder(request: String, selected_node: Node = null) -> bool:
 	_client.stream = false
 	_client.system_prompt = ""
 	# Multi-file JSON responses routinely take longer than a short Chat reply.
-	_client.timeout_seconds = maxf(_client.timeout_seconds, 180.0)
-	_set_state(GENERATING, "正在生成脚本和节点操作（最长 %d 秒）" % int(_client.timeout_seconds))
+	if _client.timeout_seconds > 0.0:
+		_client.timeout_seconds = maxf(_client.timeout_seconds, 180.0)
+		_set_state(GENERATING, "正在生成脚本和节点操作（最长 %d 秒）" % int(_client.timeout_seconds))
+	else:
+		_set_state(GENERATING, "正在生成脚本和节点操作（无超时上限）")
 	_client.send_raw([{"role": "user", "content": BUILDER.prompt(task, context)}])
 	return true
 
@@ -983,6 +996,30 @@ func _on_reasoning_chunk(text: String) -> void:
 
 func _on_models_loaded(models: Array, error_message: String) -> void:
 	models_loaded.emit(models, error_message)
+
+
+func _on_token_usage_reported(request_tokens: int) -> void:
+	if request_tokens <= 0:
+		return
+	# 只累计服务端明确返回的 usage，避免用字符数估算造成计费误导。
+	var previous := _total_tokens_consumed
+	_total_tokens_consumed += request_tokens
+	if Engine.is_editor_hint():
+		EditorInterface.get_editor_settings().set_setting(
+			"ai_assistant/total_tokens_consumed",
+			_total_tokens_consumed,
+		)
+	var previous_step := floori(float(previous) / TOKEN_WARNING_STEP)
+	var current_step := floori(float(_total_tokens_consumed) / TOKEN_WARNING_STEP)
+	if current_step > previous_step:
+		token_usage_threshold_reached.emit(
+			_total_tokens_consumed,
+			current_step * TOKEN_WARNING_STEP,
+		)
+
+
+func _on_response_stalled(elapsed_seconds: int) -> void:
+	response_stalled.emit(elapsed_seconds)
 
 
 func _set_state(next_state: String, message: String) -> void:
