@@ -16,6 +16,31 @@ const CHAT_RAIL_MIN := 340.0
 const CHAT_RAIL_MAX := 400.0
 const TASK_DOCK_WIDTH := 260.0
 const CHAT_DOCK_WIDTH := 360.0
+const QUICK_START_SETTING := "ai_assistant/quick_start_dismissed"
+const QUICK_START_TEXT := """连接设置已保存，可以开始使用 AI 工作台。
+
+1. 保存场景
+使用 Builder 前，请先创建并保存当前场景。
+
+2. 选择目标节点
+在 Godot 场景树中选中需要添加或修改脚本的节点。
+
+3. 选择使用模式
+• Builder：创建或修改脚本，并执行脚本绑定。
+• Chat：询问 Godot 或 GDScript 问题，不会修改工程。
+
+4. 描述完整任务
+请说明脚本路径、需要实现的功能，以及是否绑定到当前节点。
+
+示例：创建 res://player.gd，实现 WASD 移动，并把脚本绑定到当前选中的 CharacterBody2D 节点。
+
+5. 检查生成结果
+Builder 不会立即修改工程。请先检查代码、Diff 和节点操作。
+
+6. 应用修改
+确认无误后点击“应用全部”；不需要这些修改时点击“撤销全部”。
+
+提示：如果需要自动绑定脚本，请在任务中明确写出“绑定到当前选中的节点”。"""
 
 var controller: AIWorkbenchController
 var _timeline: AITaskTimeline
@@ -69,6 +94,10 @@ var _models_status: Label
 var _settings_body_scroll: ScrollContainer
 var _settings_footer: HBoxContainer
 var _notice_dialog: AcceptDialog
+var _quick_start_window: Window
+var _quick_start_body: Label
+var _quick_start_hide_check: CheckBox
+var _quick_start_footer: HBoxContainer
 var _model_fetching := false
 
 
@@ -92,6 +121,8 @@ func _ready() -> void:
 
 func set_active(active: bool) -> void:
 	_active = active
+	if active:
+		call_deferred("_maybe_show_quick_start")
 	if not Engine.is_editor_hint():
 		return
 	var selection := EditorInterface.get_selection()
@@ -129,6 +160,9 @@ func shutdown() -> void:
 	if _notice_dialog != null:
 		_notice_dialog.queue_free()
 		_notice_dialog = null
+	if _quick_start_window != null:
+		_quick_start_window.queue_free()
+		_quick_start_window = null
 
 
 func _build_ui() -> void:
@@ -640,6 +674,17 @@ func _attach_settings_window() -> void:
 	host.add_child(_settings_window)
 
 
+func _attach_quick_start_window() -> void:
+	if _quick_start_window == null:
+		return
+	var host := _settings_host()
+	if host == null or _quick_start_window.get_parent() == host:
+		return
+	if _quick_start_window.get_parent() != null:
+		_quick_start_window.get_parent().remove_child(_quick_start_window)
+	host.add_child(_quick_start_window)
+
+
 func _build_settings_window() -> void:
 	_settings_window = Window.new()
 	_settings_window.title = "AI 工作台设置"
@@ -781,6 +826,104 @@ func _build_settings_window() -> void:
 	layout.add_child(_settings_footer)
 
 
+func _build_quick_start_window() -> void:
+	if _quick_start_window != null and is_instance_valid(_quick_start_window):
+		_attach_quick_start_window()
+		return
+	_quick_start_window = Window.new()
+	_quick_start_window.title = "AI 工作台快速上手"
+	var editor_scale := maxf(EditorInterface.get_editor_scale(), 1.0) if Engine.is_editor_hint() else 1.0
+	_quick_start_window.content_scale_factor = editor_scale
+	var guide_size := Vector2i(roundi(560 * editor_scale), roundi(600 * editor_scale))
+	var guide_minimum := Vector2i(roundi(360 * editor_scale), roundi(360 * editor_scale))
+	if Engine.is_editor_hint():
+		var usable := DisplayServer.screen_get_usable_rect(DisplayServer.SCREEN_OF_MAIN_WINDOW)
+		if usable.size.x > 0 and usable.size.y > 0:
+			var available := Vector2i(maxi(1, usable.size.x - 40), maxi(1, usable.size.y - 40))
+			guide_size = guide_size.min(available)
+			guide_minimum = guide_minimum.min(available)
+	_quick_start_window.size = guide_size
+	_quick_start_window.min_size = guide_minimum
+	_quick_start_window.wrap_controls = false
+	_quick_start_window.transient = true
+	_quick_start_window.exclusive = false
+	_quick_start_window.unresizable = false
+	_quick_start_window.visible = false
+	_quick_start_window.close_requested.connect(_close_quick_start)
+	_attach_quick_start_window()
+
+	var panel := PanelContainer.new()
+	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	panel.add_theme_stylebox_override("panel", THEME.panel(THEME.BG, 0))
+	_quick_start_window.add_child(panel)
+	var margin := MarginContainer.new()
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	for side in ["left", "right", "top", "bottom"]:
+		margin.add_theme_constant_override("margin_" + side, 14)
+	panel.add_child(margin)
+	var layout := VBoxContainer.new()
+	layout.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	layout.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	layout.add_theme_constant_override("separation", 10)
+	margin.add_child(layout)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	layout.add_child(scroll)
+	_quick_start_body = Label.new()
+	_quick_start_body.text = QUICK_START_TEXT
+	_quick_start_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_quick_start_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_quick_start_body.custom_minimum_size.x = 0
+	THEME.apply_label(_quick_start_body, false, 13)
+	scroll.add_child(_quick_start_body)
+	_quick_start_footer = HBoxContainer.new()
+	_quick_start_footer.custom_minimum_size.y = 34
+	_quick_start_hide_check = CheckBox.new()
+	_quick_start_hide_check.text = "不再提示"
+	_quick_start_hide_check.add_theme_font_size_override("font_size", 13)
+	_quick_start_footer.add_child(_quick_start_hide_check)
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_quick_start_footer.add_child(spacer)
+	var close := Button.new()
+	close.text = "我知道了"
+	THEME.apply_button(close, "primary")
+	close.pressed.connect(_close_quick_start)
+	_quick_start_footer.add_child(close)
+	layout.add_child(_quick_start_footer)
+
+
+func _maybe_show_quick_start() -> void:
+	if not _active or controller == null or not controller.is_configured():
+		return
+	if Engine.is_editor_hint():
+		var settings := EditorInterface.get_editor_settings()
+		var dismissed := (
+			bool(settings.get_setting(QUICK_START_SETTING))
+			if settings.has_setting(QUICK_START_SETTING)
+			else false
+		)
+		if dismissed:
+			return
+	_show_quick_start()
+
+
+func _show_quick_start() -> void:
+	_build_quick_start_window()
+	_quick_start_hide_check.button_pressed = false
+	_quick_start_window.popup_centered(_quick_start_window.size)
+
+
+func _close_quick_start() -> void:
+	if _quick_start_window == null:
+		return
+	if _quick_start_hide_check != null and _quick_start_hide_check.button_pressed and Engine.is_editor_hint():
+		EditorInterface.get_editor_settings().set_setting(QUICK_START_SETTING, true)
+	_quick_start_window.hide()
+
+
 func _settings_line(container: VBoxContainer, label_text: String, placeholder: String) -> LineEdit:
 	var label := Label.new()
 	label.text = label_text
@@ -907,6 +1050,7 @@ func _save_settings() -> void:
 	_model_text.text = _model_edit.text if not _model_edit.text.is_empty() else "未配置模型"
 	_settings_window.hide()
 	_on_state_changed(controller.state_key, "设置已保存")
+	call_deferred("_maybe_show_quick_start")
 
 
 func _on_models_loaded(models: Array, error_message: String) -> void:

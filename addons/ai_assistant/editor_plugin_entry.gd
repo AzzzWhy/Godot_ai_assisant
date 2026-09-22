@@ -32,6 +32,7 @@ const EDITOR_SETTINGS := {
 	"ai_assistant/timeout": 60.0,
 	"ai_assistant/system_prompt": "你是 Godot 4.6 编程助手。默认用中文简洁回答。",
 	"ai_assistant/remember_api_key": false,
+	"ai_assistant/quick_start_dismissed": false,
 	"ai_assistant/total_tokens_consumed": 0,
 	"ai_assistant/permission_mode": "review",
 	"ai_assistant/workbench_window_size": DEFAULT_WINDOW_SIZE,

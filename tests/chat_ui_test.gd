@@ -83,6 +83,30 @@ func _initialize() -> void:
 		== "API Key 无效或未发送（HTTP 401）。",
 		"Provider errors are compacted for the layout",
 	)
+	screen._build_quick_start_window()
+	_check(screen._quick_start_window != null, "Quick-start guide window is built")
+	_check(
+		screen._quick_start_body.text.contains("保存场景")
+		and screen._quick_start_body.text.contains("Builder")
+		and screen._quick_start_body.text.contains("应用全部")
+		and screen._quick_start_body.text.contains("绑定到当前选中的节点"),
+		"Quick-start guide covers the essential workflow",
+	)
+	_check(
+		screen._quick_start_hide_check != null
+		and screen._quick_start_hide_check.text == "不再提示",
+		"Quick-start guide exposes a persistent dismissal choice",
+	)
+	screen._quick_start_window.size = Vector2i(360, 360)
+	screen._quick_start_window.show()
+	await process_frame
+	await process_frame
+	_check(
+		screen._quick_start_footer.position.y + screen._quick_start_footer.size.y
+		<= screen._quick_start_window.size.y,
+		"Quick-start footer remains visible in a small window",
+	)
+	screen._quick_start_window.hide()
 	if "--preview-settings" in OS.get_cmdline_user_args():
 		root.title = "设置窗口响应式预览（本地测试）"
 		screen._settings_window.title = "AI 工作台设置 · 窄窗口测试"
